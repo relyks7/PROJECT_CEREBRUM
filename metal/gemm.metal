@@ -1,6 +1,6 @@
 #include <metal_stdlib>
 using namespace metal;
-#define T 16
+#define T 32
 #define WIDTH 8
 kernel void gemm(
     device const float* A [[buffer(0)]],
@@ -11,16 +11,19 @@ kernel void gemm(
     constant uint& p [[buffer(5)]],
     uint2 i [[thread_position_in_threadgroup]],
     uint2 j [[threadgroup_position_in_grid]],
-    uint2 si [[simd_position_in_grid]]
+    uint si [[simdgroup_index_in_threadgroup]]
 )
 {
     threadgroup float tA[T][T+1];
     threadgroup float tB[T][T+1];
+    simdgroup_float8x8 acc; 
+    simdgroup_float8x8 matA;
+    simdgroup_float8x8 matB;
+    acc = make_filled_simdgroup_matrix(0.0f);
+    int diff=4;
+    ushort2 offset = ushort2((si % diff) * WIDTH, (si/ diff) * WIDTH);
     uint row=j.y*T+i.y;
     uint col=j.x*T+i.x;
-    uint row0=
-    uint col0=
-    float acc=0;
     for (int curtile=0;curtile<(n+T-1)/T;curtile++){
         if (row < m && (curtile*T + i.x) < n)
             tA[i.y][i.x] = A[row*n + curtile*T + i.x];
@@ -32,5 +35,21 @@ kernel void gemm(
         else
             tB[i.y][i.x] = 0.0f;
         threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (si<16){
+            #pragma unroll
+            for (int k=0;k<T;k+=WIDTH){
+                simdgroup_load(matA, (threadgroup float*)&tA[0][0], T+1, ulong2(k, offset.y));
+                simdgroup_load(matB, (threadgroup float*)&tB[0][0], T+1, ulong2(offset.x, k));
+                simdgroup_multiply_accumulate(acc, matA, matB, acc);
+            }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    uint row0=j.y*T+offset.y;
+    uint col0=j.x*T+offset.x;
+    if (si<16){
+        if (row0<m && col0<p){
+            simdgroup_store(acc, C, p, ulong2(col0, row0));
+        }
     }
 }
