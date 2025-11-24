@@ -5,9 +5,10 @@ kernel void mul(
     device const float* B[[buffer(1)]],
     device float* C[[buffer(2)]],
     constant uint& n[[buffer(3)]],
-    uint i[[thread_position_in_grid]]
+    constant uint& b[[buffer(4)]],
+    uint2 i[[thread_position_in_grid]]
 ){
-    if (i>n){
-        C[i]=A[i]*B[i];
+    if (i.x<n && i.y<b){
+        C[i.y*n+i.x]=A[i.y*n+i.x]*B[i.y*n+i.x];
     }
 }

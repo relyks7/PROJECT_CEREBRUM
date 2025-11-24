@@ -6,26 +6,32 @@ using namespace metal;
 kernel void softmax_simd_reduce(
     device const float* A [[buffer(0)]],
     device float* B [[buffer(1)]],
-    constant uint& n [[buffer(2)]],
-    constant float& global_max [[buffer(3)]],
+    device const float* mu [[buffer(2)]]
+    constant uint& n [[buffer(3)]],
+    constant uint& b [[buffer(4)]],
     uint i [[thread_position_in_threadgroup]],
-    uint j [[thread_position_in_grid]],
-    uint k [[threadgroup_position_in_grid]],
+    uint2 j [[thread_position_in_grid]],
+    uint2 k [[threadgroup_position_in_grid]],
     uint si [[thread_index_in_simdgroup]],
     uint sj [[simdgroup_index_in_threadgroup]]
 ) {
-    float val=(j<n)?exp(A[j]-global_max):0.0f;
+    if (j.y>=b) return;
+    float val=(j.x<n)?exp(A[j.y*n+j.x]-global_max[i.y]):0.0f;
     float local_sum=simd_sum(val);
     threadgroup float ps[WARPS];
     if (si==0){
         ps[sj]=local_sum;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint out_width = (n + T - 1) / T;
     if (sj==0){
-        float xs = (si < WARPS) ? ps[si] : 0.0f;
+        float xs = 0.0f;
+        if (si < WARPS) {
+            xs = ps[si]; 
+        }
         float final_sum=simd_sum(xs);
-        if (si==0){
-            B[k]=final_sum;
+        if (si == 0 && k.x < out_width) {
+            B[j.y * out_width + k.x] = final_sum;
         }
     }
 }
