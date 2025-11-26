@@ -2,7 +2,7 @@
 using namespace metal;
 kernel void softmax(
     device const float* A[[buffer(0)]],
-    device const float* B[[buffer(1)]],
+    device float* B[[buffer(1)]],
     device const float* global_max[[buffer(2)]],
     device const float* denom[[buffer(3)]],
     constant uint& n[[buffer(4)]],
