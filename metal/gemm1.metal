@@ -11,21 +11,26 @@ kernel void gemm1(
     constant uint& p [[buffer(5)]],
     constant uint& b [[buffer(6)]],
     uint2 i [[thread_position_in_threadgroup]],
-    uint3 j [[threadgroup_position_in_grid]],
+    uint2 j [[threadgroup_position_in_grid]],
     uint si [[simdgroup_index_in_threadgroup]]
 )
 {
+    
     threadgroup float tA[T][T+1];
     threadgroup float tB[T][T+1];
     simdgroup_float8x8 acc; 
     simdgroup_float8x8 matA;
     simdgroup_float8x8 matB;
-    acc = make_filled_simdgroup_matrix(0.0f);
+    acc = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
     int diff=4;
     ushort2 offset = ushort2((si % diff) * WIDTH, (si/ diff) * WIDTH);
-    uint row=j.y*T+i.y;
-    uint col=j.x*T+i.x;
-    uint layer=j.z;
+    uint blocks_per_batch = (m + T - 1) / T;
+    uint layer = j.y / blocks_per_batch;
+    uint block_row = j.y % blocks_per_batch;
+    uint block_col = j.x;
+
+    uint row = block_row * T + i.y;
+    uint col = block_col * T + i.x;
     if (layer>=b) return;
     unsigned long offsetA = (unsigned long)layer * m * n;
     unsigned long offsetB = (unsigned long)layer * n * p;
@@ -51,8 +56,8 @@ kernel void gemm1(
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
-    uint row0=j.y*T+offset.y;
-    uint col0=j.x*T+offset.x;
+    uint row0 = block_row * T + offset.y;
+    uint col0 = block_col * T + offset.x;
     if (si<16){
         if (row0<m && col0<p){
             simdgroup_store(acc, C+offsetC, p, ulong2(col0, row0));

@@ -9,7 +9,7 @@ kernel void softmax(
     constant uint& b[[buffer(5)]],
     uint2 i[[thread_position_in_grid]]
 ) {
-    if (i<n){
+    if (i.x<n && i.y<b){
         B[i.y*n+i.x]=exp(A[i.y*n+i.x]-global_max[i.y])/denom[i.y];
     }
 }

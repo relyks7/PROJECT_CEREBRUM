@@ -6,17 +6,16 @@ using namespace metal;
 kernel void variance_simd_reduce(
     device const float* A [[buffer(0)]],
     device float* B [[buffer(1)]],
-    device const float* mu [[buffer(2)]]
+    device const float* mu [[buffer(2)]],
     constant uint& n [[buffer(3)]],
     constant uint& b [[buffer(4)]],
-    uint i [[thread_position_in_threadgroup]],
     uint2 j [[thread_position_in_grid]],
     uint2 k [[threadgroup_position_in_grid]],
     uint si [[thread_index_in_simdgroup]],
     uint sj [[simdgroup_index_in_threadgroup]]
 ) {
     if (j.y>=b) return;
-    float val=(j.x<n)?(A[j.y*n+j.x]-mu[i.y])*(A[j.y*n+j.x]-mu[i.y]):0.0f;
+    float val=(j.x<n)?(A[j.y*n+j.x]-mu[j.y])*(A[j.y*n+j.x]-mu[j.y]):0.0f;
     float local_sum=simd_sum(val);
     threadgroup float ps[WARPS];
     if (si==0){

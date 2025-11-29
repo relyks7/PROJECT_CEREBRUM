@@ -8,7 +8,6 @@ kernel void max_simd_reduce(
     device float* B [[buffer(1)]],
     constant uint& n [[buffer(2)]],
     constant uint& b [[buffer(3)]],
-    uint i [[thread_position_in_threadgroup]],
     uint2 j [[thread_position_in_grid]],
     uint2 k [[threadgroup_position_in_grid]],
     uint si [[thread_index_in_simdgroup]],

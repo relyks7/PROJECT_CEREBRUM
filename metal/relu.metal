@@ -8,6 +8,6 @@ kernel void relu(
     uint2 i[[thread_position_in_grid]]
 ){
     if (i.x<n && i.y<b){
-        B[i.y*n+i.x]=max(0,A[i.y*n+i.x]);
+        B[i.y*n+i.x]=max(0.0f,A[i.y*n+i.x]);
     }
 }
