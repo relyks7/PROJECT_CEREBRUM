@@ -11,6 +11,6 @@ kernel void layernorm(
     uint2 i[[thread_position_in_grid]]
 ) {
     if (i.x<n && i.y<b){
-        B[i.y*n+i.x]=(A[i.y*n+i.x]-mu[i.x])*rsqrt(sigma2[i.x]+eps);
+        B[i.y*n+i.x]=(A[i.y*n+i.x]-mu[i.y])*rsqrt(sigma2[i.y]+eps);
     }
 }

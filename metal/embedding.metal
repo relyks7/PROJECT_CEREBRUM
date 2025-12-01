@@ -6,7 +6,6 @@ kernel void embedding(
     device float* C[[buffer(2)]],
     constant uint& n[[buffer(3)]],
     constant uint& d[[buffer(4)]],
-    constant uint& b[[buffer(5)]],
     uint i [[thread_position_in_grid]]
 )
 {
