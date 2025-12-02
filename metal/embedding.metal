@@ -2,7 +2,7 @@
 using namespace metal;
 kernel void embedding(
     device const float* A[[buffer(0)]],
-    device const int* B[[buffer(1)]],
+    device const uint* B[[buffer(1)]],
     device float* C[[buffer(2)]],
     constant uint& n[[buffer(3)]],
     constant uint& d[[buffer(4)]],

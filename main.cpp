@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
+using namespace std;
 extern "C" {
     void kernel_runner_init();
     void kernel_runner_call(
@@ -245,5 +246,10 @@ void op_outer_prod(float* A, float* B, float* C, int n, int m, int b){
 }
 int main(){
     kernel_runner_init();
+    float* a = new float[1024];
+    float* b = new float[1024];
+    float* c = new float[1049576];
+    op_outer_prod(a, b, c, 1024, 1024, 1);
+    cout<<c[0];
     return 0;
 }
