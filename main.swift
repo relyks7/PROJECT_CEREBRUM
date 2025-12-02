@@ -405,9 +405,9 @@ public func max_simd(
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
-    var cur=A,
-    var curN=n,
-    while A.count>b{
+    var cur=A
+    var curN=n
+    while curN>Int(b){
         let nextN=(curN+127)/128
         var out=[Float](repeating:0, count:nextN*Int(b))
         var buffers: [KRBuffer]=[
@@ -419,8 +419,11 @@ public func max_simd(
         kernel_runner_call(
             kernelName: "max_simd_reduce",
             buffers: &buffers,
-            gridX: Int()
-        )
+            gridX: nextN, gridY: b, gridZ: 1,
+            128, 1, 1
+        );
+        curN=nextN
+        cur=out
     }
 }
 public func cortex_step(
