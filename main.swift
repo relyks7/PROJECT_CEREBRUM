@@ -1,5 +1,6 @@
 import Metal
 import Foundation
+import Darwin
 public enum KRBuffer {
     case floatArray([Float])
     case uint32Array([UInt32])
@@ -11,7 +12,6 @@ var KR_device: MTLDevice!
 var KR_queue: MTLCommandQueue!
 var KR_libraries: [MTLLibrary] = []
 var KR_pipelines: [String : MTLComputePipelineState] = [:]
-var KR_bufferCache: [ObjectIdentifier : MTLBuffer] = [:]
 public func kernel_runner_init() {
     KR_device = MTLCreateSystemDefaultDevice()!
     KR_queue  = KR_device.makeCommandQueue()!
@@ -62,17 +62,9 @@ func KR_pipeline(_ name: String) -> MTLComputePipelineState {
     fatalError("❌ Kernel '\(name)' not found in ANY metallib")
 }
 func gpuBuffer(for array: inout [Float]) -> MTLBuffer {
-    let key = ObjectIdentifier(array as AnyObject)
     let size = array.count * MemoryLayout<Float>.size
-
-    if let existing = KR_bufferCache[key], existing.length >= size {
-        memcpy(existing.contents(), &array, size)
-        return existing
-    }
-
     let buf = KR_device.makeBuffer(length: size, options: .storageModeShared)!
     memcpy(buf.contents(), &array, size)
-    KR_bufferCache[key] = buf
     return buf
 }
 func gpuBuffer(for array: inout [UInt32]) -> MTLBuffer {
@@ -94,8 +86,8 @@ public func kernel_runner_call(
 
     enc.setComputePipelineState(pipe)
 
-    // Track Float-array buffers so we can read back after dispatch
-    var floatArrayIndices: [Int] = []
+    // Track Float-array buffers and their bound MTLBuffers for readback
+    var floatBindings: [(index: Int, buffer: MTLBuffer, count: Int)] = []
 
     // ========================================================
     // BIND ALL ARGUMENTS
@@ -107,7 +99,7 @@ public func kernel_runner_call(
             var mutable = arr
             let buf = gpuBuffer(for: &mutable)
             enc.setBuffer(buf, offset: 0, index: i)
-            floatArrayIndices.append(i)
+            floatBindings.append((i, buf, arr.count))
 
         case .uint32Array(let arr):
             var temp = arr
@@ -140,17 +132,12 @@ public func kernel_runner_call(
     // ========================================================
     // COPY RESULTS BACK INTO Swift arrays
     // ========================================================
-    for idx in floatArrayIndices {
-        if case .floatArray(let oldArr) = buffers[idx] {
-            let size = oldArr.count * MemoryLayout<Float>.size
-
-            // Find the matching cached MTLBuffer
-            let key = ObjectIdentifier(oldArr as AnyObject)
-            guard let mtlBuf = KR_bufferCache[key] else { continue }
-
+    for binding in floatBindings {
+        if case .floatArray(let oldArr) = buffers[binding.index] {
             var newArr = oldArr
-            memcpy(&newArr, mtlBuf.contents(), size)
-            buffers[idx] = .floatArray(newArr)
+            let size = min(oldArr.count, binding.count) * MemoryLayout<Float>.size
+            memcpy(&newArr, binding.buffer.contents(), size)
+            buffers[binding.index] = .floatArray(newArr)
         }
     }
 }
@@ -172,7 +159,7 @@ public func add(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "add",
+         "add",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -197,7 +184,7 @@ public func div(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "div",
+         "div",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -222,7 +209,7 @@ public func mul(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "mul",
+         "mul",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -247,7 +234,7 @@ public func sub(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "sub",
+         "sub",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -273,7 +260,7 @@ public func embedding(
         .uint32Val(d)
     ]
     kernel_runner_call(
-        kernelName: "embedding",
+         "embedding",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: 1, gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -302,7 +289,7 @@ public func gemm1(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "gemm1",
+         "gemm1",
         buffers: &buffers,
         gridX: ((Int(p)+31)/32), gridY: ((Int(m)+31)/32)*Int(b), gridZ:1,
         tgX: 32, tgY: 32, tgZ: 1
@@ -331,7 +318,7 @@ public func gemm2(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "gemm2",
+         "gemm2",
         buffers: &buffers,
         gridX: ((Int(p)+31)/32), gridY: ((Int(m)+31)/32)*Int(b), gridZ:1,
         tgX: 32, tgY: 32, tgZ: 1
@@ -360,7 +347,7 @@ public func gemm3(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "gemm3",
+         "gemm3",
         buffers: &buffers,
         gridX: ((Int(p)+31)/32), gridY: ((Int(m)+31)/32)*Int(b), gridZ:1,
         tgX: 32, tgY: 32, tgZ: 1
@@ -390,7 +377,7 @@ public func layernorm(
         .uint32Val(b)
     ]
     kernel_runner_call(
-        kernelName: "layernorm",
+         "layernorm",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -405,27 +392,303 @@ public func max_simd(
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
-    var cur=A
-    var curN=n
-    while curN>Int(b){
-        let nextN=(curN+127)/128
-        var out=[Float](repeating:0, count:nextN*Int(b))
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
         var buffers: [KRBuffer]=[
             .floatArray(cur),
             .floatArray(out),
-            .uint32Val(curN),
+            .uint32Val(UInt32(curN)),
             .uint32Val(b)
         ]
         kernel_runner_call(
-            kernelName: "max_simd_reduce",
+             "max_simd_reduce",
             buffers: &buffers,
-            gridX: nextN, gridY: b, gridZ: 1,
-            128, 1, 1
+            gridX: nextN, gridY: batch, gridZ: 1,
+            tgX: 128, tgY: 1, tgZ: 1
         );
-        curN=nextN
-        cur=out
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
     }
+    B = cur
 }
+public func sum_simd(
+    A: [Float],
+    B: inout [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
+        var buffers: [KRBuffer]=[
+            .floatArray(cur),
+            .floatArray(out),
+            .uint32Val(UInt32(curN)),
+            .uint32Val(b)
+        ]
+        kernel_runner_call(
+             "sum_simd_reduce",
+            buffers: &buffers,
+            gridX: nextN, gridY: batch, gridZ: 1,
+            tgX: 128, tgY: 1, tgZ: 1
+        );
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
+    }
+    B = cur
+}
+public func mean_simd(
+    A: [Float],
+    B: inout [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    var firstPass = true
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
+        var buffers: [KRBuffer]=[
+            .floatArray(cur),
+            .floatArray(out),
+            .uint32Val(UInt32(curN)),
+            .uint32Val(b)
+        ]
+        let kernelName = firstPass ? "mean_simd_reduce" : "sum_simd_reduce"
+        kernel_runner_call(
+             kernelName,
+            buffers: &buffers,
+            gridX: nextN, gridY: batch, gridZ: 1,
+            tgX: 128, tgY: 1, tgZ: 1
+        );
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
+        firstPass = false
+    }
+    B = cur
+}
+public func softmax_simd(
+    A: [Float],
+    B: inout [Float],
+    global_max: [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
+    precondition(global_max.count == Int(b), "global_max has wrong size")
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    var firstPass = true
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
+        var buffers: [KRBuffer]
+        if firstPass {
+            buffers = [
+                .floatArray(cur),
+                .floatArray(out),
+                .floatArray(global_max),
+                .uint32Val(UInt32(curN)),
+                .uint32Val(b)
+            ]
+            kernel_runner_call(
+                 "softmax_simd_reduce",
+                buffers: &buffers,
+                gridX: nextN, gridY: batch, gridZ: 1,
+                tgX: 128, tgY: 1, tgZ: 1
+            )
+        } else {
+            buffers = [
+                .floatArray(cur),
+                .floatArray(out),
+                .uint32Val(UInt32(curN)),
+                .uint32Val(b)
+            ]
+            kernel_runner_call(
+                 "sum_simd_reduce",
+                buffers: &buffers,
+                gridX: nextN, gridY: batch, gridZ: 1,
+                tgX: 128, tgY: 1, tgZ: 1
+            )
+        }
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
+        firstPass = false
+    }
+    B = cur
+}
+public func variance_simd(
+    A: [Float],
+    B: inout [Float],
+    mu: [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
+    precondition(mu.count == Int(b), "mu has wrong size")
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    var firstPass = true
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
+        var buffers: [KRBuffer]
+        if firstPass {
+            buffers = [
+                .floatArray(cur),
+                .floatArray(out),
+                .floatArray(mu),
+                .uint32Val(UInt32(curN)),
+                .uint32Val(b)
+            ]
+            kernel_runner_call(
+                 "variance_simd_reduce",
+                buffers: &buffers,
+                gridX: nextN, gridY: batch, gridZ: 1,
+                tgX: 128, tgY: 1, tgZ: 1
+            )
+        } else {
+            buffers = [
+                .floatArray(cur),
+                .floatArray(out),
+                .uint32Val(UInt32(curN)),
+                .uint32Val(b)
+            ]
+            kernel_runner_call(
+                 "sum_simd_reduce",
+                buffers: &buffers,
+                gridX: nextN, gridY: batch, gridZ: 1,
+                tgX: 128, tgY: 1, tgZ: 1
+            )
+        }
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
+        firstPass = false
+    }
+    B = cur
+}
+public func tanh(
+    A: [Float],
+    B: inout [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n*b), "B has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+         "tanh",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
+}
+public func relu(
+    A: [Float],
+    B: inout [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n*b), "B has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+         "relu",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
+}
+public func softmax(
+    A: [Float],
+    B: inout [Float],
+    global_max: [Float],
+    denom: [Float],
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n*b), "B has wrong size")
+    precondition(global_max.count == Int(b), "global_max has wrong size")
+    precondition(denom.count == Int(b), "denom has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .floatArray(global_max),
+        .floatArray(denom),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+         "softmax",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
+}
+public func outer_prod(
+    A: [Float],
+    B: [Float],
+    C: inout [Float],
+    n: UInt32,
+    m: UInt32,
+    b: UInt32
+){
+    gemm1(
+        A: A, B: B, C: &C,
+        m: n, n: 1, p: m,
+        b: b
+    )
+}
+
+kernel_runner_init()
+
+/*
 public func cortex_step(
     H_t0: [Float],
     W: [Float],
@@ -518,4 +781,4 @@ public func fast_oja(
     tgX: 128, tgY: 1, tgZ: 1
   )
 }
-kernel_runner_init()
+PLACEHOLDER */

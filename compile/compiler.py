@@ -7,8 +7,8 @@ import subprocess
 METAL_CMD = ["xcrun", "-sdk", "macosx", "metal"]
 METALLIB_CMD = ["xcrun", "-sdk", "macosx", "metallib"]
 
-SRC_DIR = "../metal"
-OUT_DIR = "../kernels"
+SRC_DIR = "metal"
+OUT_DIR = "kernels"
 
 # Clean output
 if os.path.exists(OUT_DIR):
