@@ -621,6 +621,30 @@ public func tanh(
     )
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
+public func softlog(
+    A: [Float],
+    B: inout [Float],
+    alpha: Float,
+    n: UInt32,
+    b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n*b), "B has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .uint32Val(n),
+        .floatVal(alpha),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+         "softlogx",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
+}
 public func relu(
     A: [Float],
     B: inout [Float],
@@ -686,9 +710,6 @@ public func outer_prod(
     )
 }
 
-kernel_runner_init()
-
-/*
 public func cortex_step(
     H_t0: [Float],
     W: [Float],
@@ -697,39 +718,8 @@ public func cortex_step(
     k: UInt32,
     n: UInt32
 ){
-    var gemm_buffers: [KRBuffer]= [
-        .floatArray(H_t0),
-        .floatArray(W),
-        .floatArray(H_t1),
-        .uint32Val(k),
-        .uint32Val(n),
-        .uint32Val(n),
-        .uint32Val(1)
-    ]
-    kernel_runner_call(
-    "gemm1",
-    buffers: &gemm_buffers,
-    gridX: 32, gridY: 32, gridZ: 1,
-    tgX: 32, tgY: 32, tgZ: 1
-    )
-    if case .floatArray(let updated) = gemm_buffers[2] {
-        H_t1 = updated
-    }
-    var tanh_buffers: [KRBuffer]= [
-        .floatArray(H_t1),
-        .floatArray(H_t1_out),
-        .uint32Val(n*k),
-        .uint32Val(1)
-    ]
-    kernel_runner_call(
-    "tanh",
-    buffers: &tanh_buffers,
-    gridX: (n*k+255)/256, gridY: 1, gridZ: 1,
-    tgX: 256, tgY: 1, tgZ: 1
-    )
-    if case .floatArray(let updated2) = tanh_buffers[1] {
-        H_t1_out = updated2
-    }
+    gemm1(H_t0, W, H_t1, k, n, n, 1)
+    tanh(H_t1, H_t1, n*k, 1)
 }
 public func fast_oja(
     X: [Float],
@@ -782,3 +772,4 @@ public func fast_oja(
   )
 }
 PLACEHOLDER */
+kernel_runner_init()
