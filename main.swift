@@ -142,11 +142,11 @@ public func kernel_runner_call(
     }
 }
 public func add(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -167,11 +167,11 @@ public func add(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func div(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -192,11 +192,11 @@ public func div(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func mul(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -217,11 +217,11 @@ public func mul(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func sub(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -241,13 +241,69 @@ public func sub(
     )
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
+public func inhib_sub(
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ alpha: Float,
+    _ n: UInt32,
+    _ b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n), "B has wrong size")
+    precondition(C.count == Int(n*b), "C has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .floatArray(C),
+        .floatVal(alpha),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+        "inhib_sub",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
+}
+public func inhib_div(
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ alpha: Float,
+    _ eps: Float,
+    _ n: UInt32,
+    _ b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n), "B has wrong size")
+    precondition(C.count == Int(n*b), "C has wrong size")
+    var buffers: [KRBuffer]=[
+        .floatArray(A),
+        .floatArray(B),
+        .floatArray(C),
+        .floatVal(alpha),
+        .floatVal(eps),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+        "inhib_div",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+    if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
+}
 public func embedding(
-    A: [Float],
-    B: [UInt32],
-    C: inout [Float],
-    n: UInt32,
-    d: UInt32,
-    vocab_size: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ d: UInt32,
+    _ vocab_size: UInt32
 ){
     precondition(A.count == Int(vocab_size*d), "A has wrong size")
     precondition(B.count == Int(n), "B has wrong size")
@@ -268,13 +324,13 @@ public func embedding(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func gemm1(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    m: UInt32,
-    n: UInt32,
-    p: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ m: UInt32,
+    _ n: UInt32,
+    _ p: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(m*n*b), "A has wrong size")
     precondition(B.count == Int(n*p*b), "B has wrong size")
@@ -297,13 +353,13 @@ public func gemm1(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func gemm2(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    m: UInt32,
-    n: UInt32,
-    p: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ m: UInt32,
+    _ n: UInt32,
+    _ p: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(m*n*b), "A has wrong size")
     precondition(B.count == Int(n*p*b), "B has wrong size")
@@ -326,13 +382,13 @@ public func gemm2(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func gemm3(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    m: UInt32,
-    n: UInt32,
-    p: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ m: UInt32,
+    _ n: UInt32,
+    _ p: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(m*n*b), "A has wrong size")
     precondition(B.count == Int(n*p*b), "B has wrong size")
@@ -355,13 +411,13 @@ public func gemm3(
     if case .floatArray(let updatedC) = buffers[2] { C = updatedC }
 }
 public func layernorm(
-    A: [Float],
-    B: inout [Float],
-    mu: [Float],
-    sigma2: [Float],
-    n: UInt32,
-    eps: Float,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ mu: [Float],
+    _ sigma2: [Float],
+    _ n: UInt32,
+    _ eps: Float,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -385,10 +441,10 @@ public func layernorm(
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
 public func max_simd(
-    A: [Float],
-    B: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
@@ -419,10 +475,10 @@ public func max_simd(
     B = cur
 }
 public func sum_simd(
-    A: [Float],
-    B: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
@@ -453,10 +509,10 @@ public func sum_simd(
     B = cur
 }
 public func mean_simd(
-    A: [Float],
-    B: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
@@ -489,12 +545,49 @@ public func mean_simd(
     }
     B = cur
 }
+public func abs_mean_simd(
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
+    let batch = Int(b)
+    var cur = A
+    var curN = Int(n)
+    var firstPass = true
+    while curN > batch {
+        let nextN = (curN + 127) / 128
+        var out = [Float](repeating: 0, count: nextN * batch)
+        var buffers: [KRBuffer]=[
+            .floatArray(cur),
+            .floatArray(out),
+            .uint32Val(UInt32(curN)),
+            .uint32Val(b)
+        ]
+        let kernelName = firstPass ? "abs_mean_simd_reduce" : "sum_simd_reduce"
+        kernel_runner_call(
+             kernelName,
+            buffers: &buffers,
+            gridX: nextN, gridY: batch, gridZ: 1,
+            tgX: 128, tgY: 1, tgZ: 1
+        );
+        if case .floatArray(let updatedOut) = buffers[1] {
+            out = updatedOut
+        }
+        cur = out
+        curN = nextN
+        firstPass = false
+    }
+    B = cur
+}
 public func softmax_simd(
-    A: [Float],
-    B: inout [Float],
-    global_max: [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ global_max: [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
@@ -545,11 +638,11 @@ public func softmax_simd(
     B = cur
 }
 public func variance_simd(
-    A: [Float],
-    B: inout [Float],
-    mu: [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ mu: [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == ((Int(n)+127)/128)*Int(b), "B has wrong size")
@@ -600,10 +693,10 @@ public func variance_simd(
     B = cur
 }
 public func tanh(
-    A: [Float],
-    B: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -622,11 +715,11 @@ public func tanh(
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
 public func softlog(
-    A: [Float],
-    B: inout [Float],
-    alpha: Float,
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ alpha: Float,
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -638,7 +731,7 @@ public func softlog(
         .uint32Val(b)
     ]
     kernel_runner_call(
-         "softlogx",
+         "softlog",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -646,10 +739,10 @@ public func softlog(
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
 public func relu(
-    A: [Float],
-    B: inout [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -668,12 +761,12 @@ public func relu(
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
 public func softmax(
-    A: [Float],
-    B: inout [Float],
-    global_max: [Float],
-    denom: [Float],
-    n: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: inout [Float],
+    _ global_max: [Float],
+    _ denom: [Float],
+    _ n: UInt32,
+    _ b: UInt32
 ){
     precondition(A.count == Int(n*b), "A has wrong size")
     precondition(B.count == Int(n*b), "B has wrong size")
@@ -696,80 +789,222 @@ public func softmax(
     if case .floatArray(let updatedB) = buffers[1] { B = updatedB }
 }
 public func outer_prod(
-    A: [Float],
-    B: [Float],
-    C: inout [Float],
-    n: UInt32,
-    m: UInt32,
-    b: UInt32
+    _ A: [Float],
+    _ B: [Float],
+    _ C: inout [Float],
+    _ n: UInt32,
+    _ m: UInt32,
+    _ b: UInt32
 ){
     gemm1(
-        A: A, B: B, C: &C,
-        m: n, n: 1, p: m,
-        b: b
+        A, B, &C,
+        n, 1, m,
+        b
     )
 }
 
 public func cortex_step(
-    H_t0: [Float],
-    W: [Float],
+    H_t0: [Float], 
+    A: [Float],
+    B: [Float],
     H_t1: inout [Float],
-    H_t1_out: inout [Float],
+    alpha_sub: Float,
+    alpha_div: Float,
     k: UInt32,
+    r: UInt32,
     n: UInt32
 ){
-    gemm1(H_t0, W, H_t1, k, n, n, 1)
-    tanh(H_t1, H_t1, n*k, 1)
+    var H_raw_inter = Array(repeating: 0.0, count: Int(k*r))
+    gemm1(H_t0, A, &H_raw_inter, k, n, r, 1)
+    var H_raw_ipt=Array(repeating:0.0, count:Int(k*n))
+    gemm2(H_raw_inter, B, &H_raw_ipt, k, r, n, 1)
+    var H_raw=Array(repeating:0.0, count:Int(k*n))
+    softlog(H_raw_ipt, &H_raw, 1.7, k*n, 1)
+    var mu=Array(repeating:0.0, count:Int(n))
+    mean_simd(H_raw, &mu, k, n)
+    var gamma=Array(repeating:0.0, count:Int(n))
+    abs_mean_simd(H_raw, &gamma, k, n)
+    var H_sub=Array(repeating:0.0, count:Int(n*k))
+    inhib_sub(H_raw, mu, &H_sub, alpha_sub, n, k)
+    inhib_div(H_sub, gamma, &H_t1, alpha_div, eps, n, k)
 }
 public func fast_oja(
-    X: [Float],
-    Y: [Float],
+    A: inout [Float],
+    B: inout [Float],
     U: [Float],
     V: [Float],
-    P: [Float],
-    Q: [Float],
-    Ysq: inout [Float],
-    nj: inout [Float],
+    X: [Float],
+    Y: [Float],
     etanull: Float,
     k: UInt32,
-    n: UInt32
+    n: UInt32,
+    r: UInt32
 ){
-  var sq_buffers: [KRBuffer]=[
-    .floatArray(Y),
-    .floatArray(Ysq),
-    .uint32Val(n*k),
-    .uint32Val(1)
-  ]
-  kernel_runner_call(
-    "square",
-    buffers=&sq_buffers,
-    gridX: (n*k+255)/256, gridY: 1, gridZ: 1,
-    tgX: 256, tgY: 1, tgZ: 1
-  )
-  var sum_buffers1: [KRBuffer]=[
-    .floatArray(Ysq),
-    .floatArray(nj),
-    .uint32Val(n),
-    .uint32Val(k)
-  ]
-  kernel_runner_call(
-    "sum_simd_reduce",
-    buffers=&sq_buffers,
-    gridX: ((n+127)/128), gridY: k, gridZ: 1,
-    tgX: 128, tgY: 1, tgZ: 1
-  )
-  var sum_buffers2: [KRBuffer]=[
-    .floatArray(Ysq),
-    .floatArray(nj),
-    .uint32Val((n+127)/128),
-    .uint32Val(k)
-  ]
-  kernel_runner_call(
-    "sum_simd_reduce",
-    buffers=&sq_buffers,
-    gridX: ((n+127)/128), gridY: ((k+127)/128), gridZ: 1,
-    tgX: 128, tgY: 1, tgZ: 1
-  )
+    // ----------------------------------------------------
+    // 1. softlog(U), softlog(V)
+    // ----------------------------------------------------
+    var U_t = [Float](repeating: 0, count: Int(n*r))
+    var V_t = [Float](repeating: 0, count: Int(n*r))
+    softlog(U, &U_t, 1.7, n, r)
+    softlog(V, &V_t, 1.7, n, r)
+
+    // M = etanull * (U_t ⊙ V_t)
+    var M = [Float](repeating: 0, count: Int(n*r))
+    mul(U_t, V_t, &M, n, r)
+
+    var eta_arr = [Float](repeating: etanull, count: Int(n*r))
+    mul(M, eta_arr, &M, n, r)
+
+
+    // ----------------------------------------------------
+    // 2. Compute p = X B    (k×n) × (n×r) = k×r
+    // ----------------------------------------------------
+    var p = [Float](repeating: 0, count: Int(k*r))
+    gemm1(X, B, &p, k, n, r, 1)
+
+
+    // ----------------------------------------------------
+    // 3. Compute q = Y A    (k×n) × (n×r) = k×r
+    // ----------------------------------------------------
+    var q = [Float](repeating: 0, count: Int(k*r))
+    gemm1(Y, A, &q, k, n, r, 1)
+
+
+    // ----------------------------------------------------
+    // 4. Compute Y^T p     (n×k) × (k×r) = n×r
+    //    This is the "Hebb" term
+    // ----------------------------------------------------
+    var YTp = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, p, &YTp, n, k, r, 1)
+    // gemm3 is A^T B, so Y^T p
+
+
+    // ----------------------------------------------------
+    // 5. Compute Y^T q     (n×k) × (k×r) = n×r
+    //    This is the Oja normalization term
+    // ----------------------------------------------------
+    var YTq = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, q, &YTq, n, k, r, 1)
+
+
+    // ----------------------------------------------------
+    // 6. G = Y^T p - Y^T q   (n×r)
+    // ----------------------------------------------------
+    var G = [Float](repeating: 0, count: Int(n*r))
+    sub(YTp, YTq, &G, n, r)
+
+
+    // ----------------------------------------------------
+    // 7. ΔA = M ⊙ G
+    // ----------------------------------------------------
+    var dA = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &dA, n, r)
+
+
+    // ----------------------------------------------------
+    // 8. ΔB = M ⊙ G   (symmetric update)
+    // ----------------------------------------------------
+    var dB = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &dB, n, r)
+
+
+    // ----------------------------------------------------
+    // 9. Apply updates
+    // ----------------------------------------------------
+    add(A, dA, &A, n, r)
+    add(B, dB, &B, n, r)
 }
-PLACEHOLDER */
+public func slow_oja(
+    U: inout [Float],     // n×r  slow-learning factor (left)
+    V: inout [Float],     // n×r  slow-learning factor (right)
+    A: [Float],           // n×r  fast-learning factor (left)
+    B: [Float],           // n×r  fast-learning factor (right)
+    X: [Float],           // k×n  presynaptic activity
+    Y: [Float],           // k×n  postsynaptic activity
+    eta0: Float,          // global fast-learning scale
+    lambda: Float,        // slow-learning rate
+    n: UInt32,            // dimension
+    r: UInt32,            // rank
+    k: UInt32             // batch size
+){
+    //----------------------------------------------------
+    // (1) softlog transforms of U and V      (n×r)
+    //----------------------------------------------------
+    var U_t = [Float](repeating: 0, count: Int(n*r))
+    var V_t = [Float](repeating: 0, count: Int(n*r))
+    softlog(U, &U_t, 1.7, n, r)
+    softlog(V, &V_t, 1.7, n, r)
+
+    //----------------------------------------------------
+    // (2) M = eta0 * (U_t ⊙ V_t)             (n×r)
+    //----------------------------------------------------
+    var M = [Float](repeating: 0, count: Int(n*r))
+    mul(U_t, V_t, &M, n, r)
+
+    var eta_arr = [Float](repeating: eta0, count: Int(n*r))
+    mul(M, eta_arr, &M, n, r)
+
+    //----------------------------------------------------
+    // (3) Compute fast Oja drive G
+    //     G = Yᵀ(XB) − Yᵀ(YA)                (n×r)
+    //----------------------------------------------------
+
+    // p = XB   (k×r)
+    var p = [Float](repeating: 0, count: Int(k*r))
+    gemm1(X, B, &p, k, n, r, 1)
+
+    // q = YA   (k×r)
+    var q = [Float](repeating: 0, count: Int(k*r))
+    gemm1(Y, A, &q, k, n, r, 1)
+
+    // Yᵀ p     (n×r)
+    var YTp = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, p, &YTp, n, k, r, 1)
+
+    // Yᵀ q     (n×r)
+    var YTq = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, q, &YTq, n, k, r, 1)
+
+    // G = Yᵀ p − Yᵀ q
+    var G = [Float](repeating: 0, count: Int(n*r))
+    sub(YTp, YTq, &G, n, r)
+
+    //----------------------------------------------------
+    // (4) H = M ⊙ G                         (n×r)
+    //----------------------------------------------------
+    var H = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &H, n, r)
+
+    //----------------------------------------------------
+    // (5) S = H ⊙ G                         (n×r)
+    //----------------------------------------------------
+    var S = [Float](repeating: 0, count: Int(n*r))
+    mul(H, G, &S, n, r)
+
+    //----------------------------------------------------
+    // (6) ΔU = S V                          (n×r)
+    //----------------------------------------------------
+    var dU = [Float](repeating: 0, count: Int(n*r))
+    gemm1(S, V, &dU, n, r, r, 1)
+
+    //----------------------------------------------------
+    // (7) ΔV = Sᵀ U                         (n×r)
+    //----------------------------------------------------
+    var dV = [Float](repeating: 0, count: Int(n*r))
+    gemm3(S, U, &dV, n, r, r, 1)
+
+    //----------------------------------------------------
+    // (8) scale ΔU, ΔV by slow rate λ
+    //----------------------------------------------------
+    var lam_arr = [Float](repeating: lambda, count: Int(n*r))
+    mul(dU, lam_arr, &dU, n, r)
+    mul(dV, lam_arr, &dV, n, r)
+
+    //----------------------------------------------------
+    // (9) apply updates to U and V
+    //----------------------------------------------------
+    add(U, dU, &U, n, r)
+    add(V, dV, &V, n, r)
+}
+
 kernel_runner_init()

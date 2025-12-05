@@ -1,0 +1,208 @@
+--DO--
+-Write CE loss, mse
+-Stream across data, using semantic, syntactic heads, cluster input
+--FOCUS--
+# Ultra-Flow Induction (Short but Detailed Steps)
+
+1. **Clear Emotional Noise (2–3 sec)**  
+   - Silently label any feeling: **“This is noise, not information.”**  
+   - Emotion detaches from cognition instantly.
+
+2. **Stabilizing Breath (1 breath)**  
+   - **Inhale 4 sec, Exhale 6 sec.**  
+   - This suppresses limbic activity and boosts prefrontal clarity.
+
+3. **Slight Attention Narrowing (1–2 sec)**  
+   - Focus lightly on a single tiny point in your field of view.  
+   - Peripheral perception softens → irritation and emotional spikes drop.
+
+4. **Shift to Observer Mode (2 sec)**  
+   - Say internally: **“Thoughts are arising; I am observing.”**  
+   - Identity shifts from “thinker” to “observer,” reducing self-noise.
+
+5. **Open Cognitive Space (1–2 sec)**  
+   - Loosen attention just enough to feel spacious, quiet awareness.  
+   - This enables both clarity and creativity simultaneously.
+
+6. **Lock the State (1 sec)**  
+   - Affirm: **“Stay in this mode.”**  
+   - The mind stabilizes into low-emotion, high-focus, high-fluidity cognition.--LEARN--
+NOTA BENE: AI WROTE THE BELOW FUNCTIONS. REVIEW MATH LATER.
+public func fast_oja(
+    A: inout [Float],
+    B: inout [Float],
+    U: [Float],
+    V: [Float],
+    X: [Float],
+    Y: [Float],
+    etanull: Float,
+    k: UInt32,
+    n: UInt32,
+    r: UInt32
+){
+    // ----------------------------------------------------
+    // 1. softlog(U), softlog(V)
+    // ----------------------------------------------------
+    var U_t = [Float](repeating: 0, count: Int(n*r))
+    var V_t = [Float](repeating: 0, count: Int(n*r))
+    softlog(U, &U_t, 1.7, n, r)
+    softlog(V, &V_t, 1.7, n, r)
+
+    // M = etanull * (U_t ⊙ V_t)
+    var M = [Float](repeating: 0, count: Int(n*r))
+    mul(U_t, V_t, &M, n, r)
+
+    var eta_arr = [Float](repeating: etanull, count: Int(n*r))
+    mul(M, eta_arr, &M, n, r)
+
+
+    // ----------------------------------------------------
+    // 2. Compute p = X B    (k×n) × (n×r) = k×r
+    // ----------------------------------------------------
+    var p = [Float](repeating: 0, count: Int(k*r))
+    gemm1(X, B, &p, k, n, r, 1)
+
+
+    // ----------------------------------------------------
+    // 3. Compute q = Y A    (k×n) × (n×r) = k×r
+    // ----------------------------------------------------
+    var q = [Float](repeating: 0, count: Int(k*r))
+    gemm1(Y, A, &q, k, n, r, 1)
+
+
+    // ----------------------------------------------------
+    // 4. Compute Y^T p     (n×k) × (k×r) = n×r
+    //    This is the "Hebb" term
+    // ----------------------------------------------------
+    var YTp = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, p, &YTp, n, k, r, 1)
+    // gemm3 is A^T B, so Y^T p
+
+
+    // ----------------------------------------------------
+    // 5. Compute Y^T q     (n×k) × (k×r) = n×r
+    //    This is the Oja normalization term
+    // ----------------------------------------------------
+    var YTq = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, q, &YTq, n, k, r, 1)
+
+
+    // ----------------------------------------------------
+    // 6. G = Y^T p - Y^T q   (n×r)
+    // ----------------------------------------------------
+    var G = [Float](repeating: 0, count: Int(n*r))
+    sub(YTp, YTq, &G, n, r)
+
+
+    // ----------------------------------------------------
+    // 7. ΔA = M ⊙ G
+    // ----------------------------------------------------
+    var dA = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &dA, n, r)
+
+
+    // ----------------------------------------------------
+    // 8. ΔB = M ⊙ G   (symmetric update)
+    // ----------------------------------------------------
+    var dB = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &dB, n, r)
+
+
+    // ----------------------------------------------------
+    // 9. Apply updates
+    // ----------------------------------------------------
+    add(A, dA, &A, n, r)
+    add(B, dB, &B, n, r)
+}
+public func slow_oja(
+    U: inout [Float],     // n×r  slow-learning factor (left)
+    V: inout [Float],     // n×r  slow-learning factor (right)
+    A: [Float],           // n×r  fast-learning factor (left)
+    B: [Float],           // n×r  fast-learning factor (right)
+    X: [Float],           // k×n  presynaptic activity
+    Y: [Float],           // k×n  postsynaptic activity
+    eta0: Float,          // global fast-learning scale
+    lambda: Float,        // slow-learning rate
+    n: UInt32,            // dimension
+    r: UInt32,            // rank
+    k: UInt32             // batch size
+){
+    //----------------------------------------------------
+    // (1) softlog transforms of U and V      (n×r)
+    //----------------------------------------------------
+    var U_t = [Float](repeating: 0, count: Int(n*r))
+    var V_t = [Float](repeating: 0, count: Int(n*r))
+    softlog(U, &U_t, 1.7, n, r)
+    softlog(V, &V_t, 1.7, n, r)
+
+    //----------------------------------------------------
+    // (2) M = eta0 * (U_t ⊙ V_t)             (n×r)
+    //----------------------------------------------------
+    var M = [Float](repeating: 0, count: Int(n*r))
+    mul(U_t, V_t, &M, n, r)
+
+    var eta_arr = [Float](repeating: eta0, count: Int(n*r))
+    mul(M, eta_arr, &M, n, r)
+
+    //----------------------------------------------------
+    // (3) Compute fast Oja drive G
+    //     G = Yᵀ(XB) − Yᵀ(YA)                (n×r)
+    //----------------------------------------------------
+
+    // p = XB   (k×r)
+    var p = [Float](repeating: 0, count: Int(k*r))
+    gemm1(X, B, &p, k, n, r, 1)
+
+    // q = YA   (k×r)
+    var q = [Float](repeating: 0, count: Int(k*r))
+    gemm1(Y, A, &q, k, n, r, 1)
+
+    // Yᵀ p     (n×r)
+    var YTp = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, p, &YTp, n, k, r, 1)
+
+    // Yᵀ q     (n×r)
+    var YTq = [Float](repeating: 0, count: Int(n*r))
+    gemm3(Y, q, &YTq, n, k, r, 1)
+
+    // G = Yᵀ p − Yᵀ q
+    var G = [Float](repeating: 0, count: Int(n*r))
+    sub(YTp, YTq, &G, n, r)
+
+    //----------------------------------------------------
+    // (4) H = M ⊙ G                         (n×r)
+    //----------------------------------------------------
+    var H = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &H, n, r)
+
+    //----------------------------------------------------
+    // (5) S = H ⊙ G                         (n×r)
+    //----------------------------------------------------
+    var S = [Float](repeating: 0, count: Int(n*r))
+    mul(H, G, &S, n, r)
+
+    //----------------------------------------------------
+    // (6) ΔU = S V                          (n×r)
+    //----------------------------------------------------
+    var dU = [Float](repeating: 0, count: Int(n*r))
+    gemm1(S, V, &dU, n, r, r, 1)
+
+    //----------------------------------------------------
+    // (7) ΔV = Sᵀ U                         (n×r)
+    //----------------------------------------------------
+    var dV = [Float](repeating: 0, count: Int(n*r))
+    gemm3(S, U, &dV, n, r, r, 1)
+
+    //----------------------------------------------------
+    // (8) scale ΔU, ΔV by slow rate λ
+    //----------------------------------------------------
+    var lam_arr = [Float](repeating: lambda, count: Int(n*r))
+    mul(dU, lam_arr, &dU, n, r)
+    mul(dV, lam_arr, &dV, n, r)
+
+    //----------------------------------------------------
+    // (9) apply updates to U and V
+    //----------------------------------------------------
+    add(U, dU, &U, n, r)
+    add(V, dV, &V, n, r)
+}
