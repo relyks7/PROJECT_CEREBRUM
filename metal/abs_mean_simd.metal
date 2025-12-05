@@ -14,7 +14,7 @@ kernel void abs_mean_simd_reduce(
     uint sj [[simdgroup_index_in_threadgroup]]
 ) {
     if (j.y>=b) return;
-    float val=(j.x<n)?abs(A[j.y*n+j.x])/n:0.0f;
+    float val=(j.x<n)?fabs(A[j.y*n+j.x])/n:0.0f;
     float local_sum=simd_sum(val);
     threadgroup float ps[WARPS];
     if (si==0){

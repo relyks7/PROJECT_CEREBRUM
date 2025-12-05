@@ -27,7 +27,7 @@
 6. **Lock the State (1 sec)**  
    - Affirm: **“Stay in this mode.”**  
    - The mind stabilizes into low-emotion, high-focus, high-fluidity cognition.--LEARN--
-NOTA BENE: AI WROTE THE BELOW FUNCTIONS. REVIEW MATH LATER.
+NOTA BENE: AI WROTE THE BELOW FUNCTIONS. REVIEW MATH TRICKS LATER.
 public func fast_oja(
     A: inout [Float],
     B: inout [Float],
@@ -115,94 +115,79 @@ public func fast_oja(
     add(B, dB, &B, n, r)
 }
 public func slow_oja(
-    U: inout [Float],     // n×r  slow-learning factor (left)
-    V: inout [Float],     // n×r  slow-learning factor (right)
-    A: [Float],           // n×r  fast-learning factor (left)
-    B: [Float],           // n×r  fast-learning factor (right)
-    X: [Float],           // k×n  presynaptic activity
-    Y: [Float],           // k×n  postsynaptic activity
-    eta0: Float,          // global fast-learning scale
-    lambda: Float,        // slow-learning rate
-    n: UInt32,            // dimension
-    r: UInt32,            // rank
-    k: UInt32             // batch size
-){
-    //----------------------------------------------------
-    // (1) softlog transforms of U and V      (n×r)
-    //----------------------------------------------------
+    U: inout [Float],
+    V: inout [Float],
+    A: [Float],
+    B: [Float],
+    X: [Float],
+    Y: [Float],
+    E: [Float],
+    eta0: Float,
+    lambda: Float,
+    beta: Float,
+    n: UInt32,
+    r: UInt32,
+    k: UInt32
+) {
+    // 0) Compute global surprise δ from E (on CPU)
+    let kn = Int(k * n)
+    var absSum: Float = 0
+    for i in 0..<kn { absSum += abs(E[i]) }
+    let deltaRaw = absSum / Float(kn)
+    let delta = tanh(beta * deltaRaw)  // global modulatory factor
+
+    // 1) softlog(U), softlog(V) → U_t, V_t
     var U_t = [Float](repeating: 0, count: Int(n*r))
     var V_t = [Float](repeating: 0, count: Int(n*r))
     softlog(U, &U_t, 1.7, n, r)
     softlog(V, &V_t, 1.7, n, r)
 
-    //----------------------------------------------------
-    // (2) M = eta0 * (U_t ⊙ V_t)             (n×r)
-    //----------------------------------------------------
+    // 2) M = eta0 * (U_t ⊙ V_t)
     var M = [Float](repeating: 0, count: Int(n*r))
     mul(U_t, V_t, &M, n, r)
+    var etaArr = [Float](repeating: eta0, count: Int(n*r))
+    mul(M, etaArr, &M, n, r)
 
-    var eta_arr = [Float](repeating: eta0, count: Int(n*r))
-    mul(M, eta_arr, &M, n, r)
-
-    //----------------------------------------------------
-    // (3) Compute fast Oja drive G
-    //     G = Yᵀ(XB) − Yᵀ(YA)                (n×r)
-    //----------------------------------------------------
-
-    // p = XB   (k×r)
+    // 3) Compute G = Yᵀ(XB) − Yᵀ(YA)
     var p = [Float](repeating: 0, count: Int(k*r))
     gemm1(X, B, &p, k, n, r, 1)
 
-    // q = YA   (k×r)
     var q = [Float](repeating: 0, count: Int(k*r))
     gemm1(Y, A, &q, k, n, r, 1)
 
-    // Yᵀ p     (n×r)
     var YTp = [Float](repeating: 0, count: Int(n*r))
     gemm3(Y, p, &YTp, n, k, r, 1)
 
-    // Yᵀ q     (n×r)
     var YTq = [Float](repeating: 0, count: Int(n*r))
     gemm3(Y, q, &YTq, n, k, r, 1)
 
-    // G = Yᵀ p − Yᵀ q
     var G = [Float](repeating: 0, count: Int(n*r))
     sub(YTp, YTq, &G, n, r)
 
-    //----------------------------------------------------
-    // (4) H = M ⊙ G                         (n×r)
-    //----------------------------------------------------
-    var H = [Float](repeating: 0, count: Int(n*r))
-    mul(M, G, &H, n, r)
+    // 4) H_fast = M ⊙ G
+    var H_fast = [Float](repeating: 0, count: Int(n*r))
+    mul(M, G, &H_fast, n, r)
 
-    //----------------------------------------------------
-    // (5) S = H ⊙ G                         (n×r)
-    //----------------------------------------------------
+    // 5) S = δ * (H_fast ⊙ G)
     var S = [Float](repeating: 0, count: Int(n*r))
-    mul(H, G, &S, n, r)
+    mul(H_fast, G, &S, n, r)
+    if delta != 0 {
+        var deltaArr = [Float](repeating: delta, count: Int(n*r))
+        mul(S, deltaArr, &S, n, r)
+    }
 
-    //----------------------------------------------------
-    // (6) ΔU = S V                          (n×r)
-    //----------------------------------------------------
+    // 6) ΔU = λ * S V
     var dU = [Float](repeating: 0, count: Int(n*r))
     gemm1(S, V, &dU, n, r, r, 1)
 
-    //----------------------------------------------------
-    // (7) ΔV = Sᵀ U                         (n×r)
-    //----------------------------------------------------
+    // 7) ΔV = λ * Sᵀ U
     var dV = [Float](repeating: 0, count: Int(n*r))
     gemm3(S, U, &dV, n, r, r, 1)
 
-    //----------------------------------------------------
-    // (8) scale ΔU, ΔV by slow rate λ
-    //----------------------------------------------------
-    var lam_arr = [Float](repeating: lambda, count: Int(n*r))
-    mul(dU, lam_arr, &dU, n, r)
-    mul(dV, lam_arr, &dV, n, r)
+    var lamArr = [Float](repeating: lambda, count: Int(n*r))
+    mul(dU, lamArr, &dU, n, r)
+    mul(dV, lamArr, &dV, n, r)
 
-    //----------------------------------------------------
-    // (9) apply updates to U and V
-    //----------------------------------------------------
     add(U, dU, &U, n, r)
     add(V, dV, &V, n, r)
 }
