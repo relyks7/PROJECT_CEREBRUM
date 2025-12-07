@@ -89,6 +89,17 @@ func runAllKernelSanityChecks() {
         }
         return C
     }
+    func deviceBuffer(_ values: [Float]) -> DeviceFloatBuffer {
+        DeviceFloatBuffer(values)
+    }
+    func zerosBuffer(_ count: Int) -> DeviceFloatBuffer {
+        let buf = DeviceFloatBuffer(count: count)
+        buf.fill(0)
+        return buf
+    }
+    func readBuffer(_ buffer: DeviceFloatBuffer) -> [Float] {
+        buffer.toArray()
+    }
 
     // Elementwise ops
     let ewN: UInt32 = 16
@@ -97,21 +108,24 @@ func runAllKernelSanityChecks() {
     let vecA = (0..<totalEW).map { Float($0) + 1 }
     let vecB = (0..<totalEW).map { Float($0) * 0.25 + 2 }
 
-    var cAdd = [Float](repeating: 0, count: totalEW)
-    add(A: vecA, B: vecB, C: &cAdd, n: ewN, b: ewB)
-    reportArray("add", gpu: cAdd, expected: elementwise(vecA, vecB, op: +))
+    let ewBufA = deviceBuffer(vecA)
+    let ewBufB = deviceBuffer(vecB)
 
-    var cSub = [Float](repeating: 0, count: totalEW)
-    sub(A: vecA, B: vecB, C: &cSub, n: ewN, b: ewB)
-    reportArray("sub", gpu: cSub, expected: elementwise(vecA, vecB, op: -))
+    let addOut = zerosBuffer(totalEW)
+    add(ewBufA, ewBufB, addOut, ewN, ewB)
+    reportArray("add", gpu: readBuffer(addOut), expected: elementwise(vecA, vecB, op: +))
 
-    var cMul = [Float](repeating: 0, count: totalEW)
-    mul(A: vecA, B: vecB, C: &cMul, n: ewN, b: ewB)
-    reportArray("mul", gpu: cMul, expected: elementwise(vecA, vecB, op: *))
+    let subOut = zerosBuffer(totalEW)
+    sub(ewBufA, ewBufB, subOut, ewN, ewB)
+    reportArray("sub", gpu: readBuffer(subOut), expected: elementwise(vecA, vecB, op: -))
 
-    var cDiv = [Float](repeating: 0, count: totalEW)
-    div(A: vecA, B: vecB, C: &cDiv, n: ewN, b: ewB)
-    reportArray("div", gpu: cDiv, expected: elementwise(vecA, vecB, op: /))
+    let mulOut = zerosBuffer(totalEW)
+    mul(ewBufA, ewBufB, mulOut, ewN, ewB)
+    reportArray("mul", gpu: readBuffer(mulOut), expected: elementwise(vecA, vecB, op: *))
+
+    let divOut = zerosBuffer(totalEW)
+    div(ewBufA, ewBufB, divOut, ewN, ewB)
+    reportArray("div", gpu: readBuffer(divOut), expected: elementwise(vecA, vecB, op: /))
 
     // Embedding
     let vocab: UInt32 = 5
@@ -119,8 +133,10 @@ func runAllKernelSanityChecks() {
     let embedN: UInt32 = 3
     let embedTable = (0..<Int(vocab * embedDim)).map { Float($0) }
     let embedIdx: [UInt32] = [0, 2, 4]
-    var embedOut = [Float](repeating: 0, count: Int(embedN * embedDim))
-    embedding(A: embedTable, B: embedIdx, C: &embedOut, n: embedN, d: embedDim, vocab_size: vocab)
+    let embedTableBuf = deviceBuffer(embedTable)
+    let embedOutBuf = zerosBuffer(Int(embedN * embedDim))
+    embedding(embedTableBuf, embedIdx, embedOutBuf, embedN, embedDim, vocab)
+    let embedOut = readBuffer(embedOutBuf)
     var embedExpected = [Float](repeating: 0, count: embedOut.count)
     for i in 0..<Int(embedN) {
         let idx = Int(embedIdx[i])
@@ -136,24 +152,30 @@ func runAllKernelSanityChecks() {
     let gp: UInt32 = 32
     let gemm1A = (0..<Int(gm * gn)).map { Float(($0 % 17) - 8) }
     let gemm1B = (0..<Int(gn * gp)).map { Float(($0 % 13) - 6) }
-    var gemm1C = [Float](repeating: 0, count: Int(gm * gp))
-    gemm1(A: gemm1A, B: gemm1B, C: &gemm1C, m: gm, n: gn, p: gp, b: 1)
+    let gemm1ABuf = deviceBuffer(gemm1A)
+    let gemm1BBuf = deviceBuffer(gemm1B)
+    let gemm1Cbuf = zerosBuffer(Int(gm * gp))
+    gemm1(gemm1ABuf, gemm1BBuf, gemm1Cbuf, gm, gn, gp, 1)
     let gemm1Expected = cpuGemmRowMajor(A: gemm1A, B: gemm1B, m: Int(gm), n: Int(gn), p: Int(gp), batches: 1)
-    reportArray("gemm1", gpu: gemm1C, expected: gemm1Expected)
+    reportArray("gemm1", gpu: readBuffer(gemm1Cbuf), expected: gemm1Expected)
 
     let gemm2A = (0..<Int(gm * gn)).map { Float(($0 % 23) - 11) }
     let gemm2B = (0..<Int(gp * gn)).map { Float(($0 % 19) - 9) }
-    var gemm2C = [Float](repeating: 0, count: Int(gm * gp))
-    gemm2(A: gemm2A, B: gemm2B, C: &gemm2C, m: gm, n: gn, p: gp, b: 1)
+    let gemm2ABuf = deviceBuffer(gemm2A)
+    let gemm2BBuf = deviceBuffer(gemm2B)
+    let gemm2Cbuf = zerosBuffer(Int(gm * gp))
+    gemm2(gemm2ABuf, gemm2BBuf, gemm2Cbuf, gm, gn, gp, 1)
     let gemm2Expected = cpuGemmWithBTransposed(A: gemm2A, B: gemm2B, m: Int(gm), n: Int(gn), p: Int(gp), batches: 1)
-    reportArray("gemm2", gpu: gemm2C, expected: gemm2Expected)
+    reportArray("gemm2", gpu: readBuffer(gemm2Cbuf), expected: gemm2Expected)
 
     let gemm3A = (0..<Int(gn * gm)).map { Float(($0 % 29) - 14) }
     let gemm3B = (0..<Int(gn * gp)).map { Float(($0 % 31) - 7) }
-    var gemm3C = [Float](repeating: 0, count: Int(gm * gp))
-    gemm3(A: gemm3A, B: gemm3B, C: &gemm3C, m: gm, n: gn, p: gp, b: 1)
+    let gemm3ABuf = deviceBuffer(gemm3A)
+    let gemm3BBuf = deviceBuffer(gemm3B)
+    let gemm3Cbuf = zerosBuffer(Int(gm * gp))
+    gemm3(gemm3ABuf, gemm3BBuf, gemm3Cbuf, gm, gn, gp, 1)
     let gemm3Expected = cpuGemmWithATransposed(A: gemm3A, B: gemm3B, m: Int(gm), n: Int(gn), p: Int(gp), batches: 1)
-    reportArray("gemm3", gpu: gemm3C, expected: gemm3Expected)
+    reportArray("gemm3", gpu: readBuffer(gemm3Cbuf), expected: gemm3Expected)
 
     // Layer norm
     let lnN: UInt32 = 8
@@ -175,9 +197,13 @@ func runAllKernelSanityChecks() {
         }
         sigma2[batch] = varVal
     }
-    var lnOut = [Float](repeating: 0, count: lnInput.count)
     let eps: Float = 1e-5
-    layernorm(A: lnInput, B: &lnOut, mu: mu, sigma2: sigma2, n: lnN, eps: eps, b: lnB)
+    let lnInBuf = deviceBuffer(lnInput)
+    let lnOutBuf = zerosBuffer(lnInput.count)
+    let muBuf = deviceBuffer(mu)
+    let sigmaBuf = deviceBuffer(sigma2)
+    layernorm(lnInBuf, lnOutBuf, muBuf, sigmaBuf, lnN, eps, lnB)
+    let lnOut = readBuffer(lnOutBuf)
     var lnExpected = [Float](repeating: 0, count: lnInput.count)
     for batch in 0..<Int(lnB) {
         let denom = sqrtf(sigma2[batch] + eps)
@@ -190,65 +216,48 @@ func runAllKernelSanityChecks() {
 
     // Reductions (single batch)
     let redN: UInt32 = 256
-#if true
-    func reductionFinalValue(_ reduced: [Float]) -> Float {
-        var cur = reduced
-        while cur.count > 1 {
-            let chunk = (cur.count + 127) / 128
-            var next = [Float](repeating: 0, count: chunk)
-            for i in 0..<chunk {
-                var acc: Float = 0
-                for j in 0..<128 {
-                    let idx = i * 128 + j
-                    if idx < cur.count {
-                        acc += cur[idx]
-                    }
-                }
-                next[i] = acc
-            }
-            cur = next
-        }
-        return cur.first ?? .nan
-    }
-#endif
-
     let redData = (0..<Int(redN)).map { Float(($0 % 37) - 18) }
-    var maxOut = [Float](repeating: 0, count: (Int(redN)+127)/128)
-    max_simd(A: redData, B: &maxOut, n: redN, b: 1)
-    reportScalar("max_simd", gpu: maxOut.first ?? .nan, expected: redData.max() ?? .nan)
+    let redBuf = deviceBuffer(redData)
 
-    var sumOut = [Float](repeating: 0, count: (Int(redN)+127)/128)
-    sum_simd(A: redData, B: &sumOut, n: redN, b: 1)
-    reportScalar("sum_simd", gpu: sumOut.first ?? .nan, expected: redData.reduce(0, +))
+    let maxOutBuf = zerosBuffer(1)
+    max_simd(redBuf, maxOutBuf, redN, 1)
+    reportScalar("max_simd", gpu: readBuffer(maxOutBuf).first ?? .nan, expected: redData.max() ?? .nan)
 
-    var meanOut = [Float](repeating: 0, count: (Int(redN)+127)/128)
-    mean_simd(A: redData, B: &meanOut, n: redN, b: 1)
-    reportScalar("mean_simd", gpu: reductionFinalValue(meanOut), expected: redData.reduce(0, +) / Float(redData.count))
+    let sumOutBuf = zerosBuffer(1)
+    sum_simd(redBuf, sumOutBuf, redN, 1)
+    reportScalar("sum_simd", gpu: readBuffer(sumOutBuf).first ?? .nan, expected: redData.reduce(0, +))
+
+    let meanOutBuf = zerosBuffer(1)
+    mean_simd(redBuf, meanOutBuf, redN, 1)
+    reportScalar("mean_simd", gpu: readBuffer(meanOutBuf).first ?? .nan, expected: redData.reduce(0, +) / Float(redData.count))
 
     let globalMax = redData.max() ?? 0
-    var softmaxReduceOut = [Float](repeating: 0, count: (Int(redN)+127)/128)
-    softmax_simd(A: redData, B: &softmaxReduceOut, global_max: [globalMax], n: redN, b: 1)
+    let softmaxReduceBuf = zerosBuffer(1)
+    let globalMaxBuf = deviceBuffer([globalMax])
+    softmax_simd(redBuf, softmaxReduceBuf, globalMaxBuf, redN, 1)
     let softmaxDenom = redData.map { expf($0 - globalMax) }.reduce(0, +)
-    reportScalar("softmax_simd_reduce", gpu: reductionFinalValue(softmaxReduceOut), expected: softmaxDenom)
+    reportScalar("softmax_simd_reduce", gpu: readBuffer(softmaxReduceBuf).first ?? .nan, expected: softmaxDenom)
 
     let meanVal = redData.reduce(0, +) / Float(redData.count)
-    var varianceOut = [Float](repeating: 0, count: (Int(redN)+127)/128)
-    variance_simd(A: redData, B: &varianceOut, mu: [meanVal], n: redN, b: 1)
+    let varianceOutBuf = zerosBuffer(1)
+    let muBuf = deviceBuffer([meanVal])
+    variance_simd(redBuf, varianceOutBuf, muBuf, redN, 1)
     let varianceExpected = redData.map { let diff = $0 - meanVal; return diff * diff }.reduce(0, +)
-    reportScalar("variance_simd_reduce", gpu: reductionFinalValue(varianceOut), expected: varianceExpected)
+    reportScalar("variance_simd_reduce", gpu: readBuffer(varianceOutBuf).first ?? .nan, expected: varianceExpected)
 
     // Activations
     let actN: UInt32 = 16
     let actInput = (0..<Int(actN)).map { Float($0) - 8 }
-    var tanhOut = actInput
-    tanh(A: actInput, B: &tanhOut, n: actN, b: 1)
+    let actBuf = deviceBuffer(actInput)
+    let tanhBuf = zerosBuffer(Int(actN))
+    tanh(actBuf, tanhBuf, actN, 1)
     let tanhExpected = actInput.map { tanhf($0) }
-    reportArray("tanh", gpu: tanhOut, expected: tanhExpected)
+    reportArray("tanh", gpu: readBuffer(tanhBuf), expected: tanhExpected)
 
-    var reluOut = actInput
-    relu(A: actInput, B: &reluOut, n: actN, b: 1)
+    let reluBuf = zerosBuffer(Int(actN))
+    relu(actBuf, reluBuf, actN, 1)
     let reluExpected = actInput.map { max(0 as Float, $0) }
-    reportArray("relu", gpu: reluOut, expected: reluExpected)
+    reportArray("relu", gpu: readBuffer(reluBuf), expected: reluExpected)
 
     // Softmax
     let smN: UInt32 = 4
@@ -263,8 +272,11 @@ func runAllKernelSanityChecks() {
         softGlobalMax[batch] = maxVal
         softDenom[batch] = slice.map { expf($0 - maxVal) }.reduce(0, +)
     }
-    var softOutput = [Float](repeating: 0, count: softInput.count)
-    softmax(A: softInput, B: &softOutput, global_max: softGlobalMax, denom: softDenom, n: smN, b: smB)
+    let softInputBuf = deviceBuffer(softInput)
+    let softOutputBuf = zerosBuffer(softInput.count)
+    let softGlobalBuf = deviceBuffer(softGlobalMax)
+    let softDenomBuf = deviceBuffer(softDenom)
+    softmax(softInputBuf, softOutputBuf, softGlobalBuf, softDenomBuf, smN, smB)
     var softExpected = [Float](repeating: 0, count: softInput.count)
     for batch in 0..<Int(smB) {
         for i in 0..<Int(smN) {
@@ -272,22 +284,24 @@ func runAllKernelSanityChecks() {
             softExpected[idx] = expf(softInput[idx] - softGlobalMax[batch]) / softDenom[batch]
         }
     }
-    reportArray("softmax", gpu: softOutput, expected: softExpected)
+    reportArray("softmax", gpu: readBuffer(softOutputBuf), expected: softExpected)
 
     // Outer product
     let outerN: UInt32 = 32
     let outerM: UInt32 = 32
     let outerA = (0..<Int(outerN)).map { Float($0) + 1 }
     let outerBVec = (0..<Int(outerM)).map { Float($0) - 2 }
-    var outerC = [Float](repeating: 0, count: Int(outerN * outerM))
-    outer_prod(A: outerA, B: outerBVec, C: &outerC, n: outerN, m: outerM, b: 1)
-    var outerExpected = [Float](repeating: 0, count: outerC.count)
+    let outerABuf = deviceBuffer(outerA)
+    let outerBBuf = deviceBuffer(outerBVec)
+    let outerCBuf = zerosBuffer(Int(outerN * outerM))
+    outer_prod(outerABuf, outerBBuf, outerCBuf, outerN, outerM, 1)
+    var outerExpected = [Float](repeating: 0, count: Int(outerN * outerM))
     for i in 0..<Int(outerN) {
         for j in 0..<Int(outerM) {
             outerExpected[i * Int(outerM) + j] = outerA[i] * outerBVec[j]
         }
     }
-    reportArray("outer_prod", gpu: outerC, expected: outerExpected)
+    reportArray("outer_prod", gpu: readBuffer(outerCBuf), expected: outerExpected)
 }
 
 runAllKernelSanityChecks()
