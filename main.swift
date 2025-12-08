@@ -12,7 +12,11 @@ var KR_queue: MTLCommandQueue!
 var KR_libraries: [MTLLibrary] = []
 var KR_pipelines: [String : MTLComputePipelineState] = [:]
 let KR_maxInflightBuffers = 3
+let KR_maxDispatchesPerBuffer = 32
 var KR_inflight: [MTLCommandBuffer] = []
+var KR_currentCommandBuffer: MTLCommandBuffer?
+var KR_currentEncoder: MTLComputeCommandEncoder?
+var KR_dispatchesInCurrentCommand = 0
 public func kernel_runner_init() {
     if KR_device != nil { return }
     KR_device = MTLCreateSystemDefaultDevice()!
@@ -55,7 +59,31 @@ func KR_waitForFreeSlot() {
         oldest.waitUntilCompleted()
     }
 }
+@inline(__always)
+func KR_obtainEncoder() -> MTLComputeCommandEncoder {
+    if let encoder = KR_currentEncoder {
+        return encoder
+    }
+    KR_waitForFreeSlot()
+    let cmd = KR_queue.makeCommandBuffer()!
+    KR_currentCommandBuffer = cmd
+    let encoder = cmd.makeComputeCommandEncoder()!
+    KR_currentEncoder = encoder
+    KR_dispatchesInCurrentCommand = 0
+    return encoder
+}
+@inline(__always)
+func KR_finishEncoderIfNeeded() {
+    guard let encoder = KR_currentEncoder, let cmd = KR_currentCommandBuffer else { return }
+    encoder.endEncoding()
+    cmd.commit()
+    KR_inflight.append(cmd)
+    KR_currentEncoder = nil
+    KR_currentCommandBuffer = nil
+    KR_dispatchesInCurrentCommand = 0
+}
 public func kernel_runner_synchronize() {
+    KR_finishEncoderIfNeeded()
     while !KR_inflight.isEmpty {
         let pending = KR_inflight.removeFirst()
         pending.waitUntilCompleted()
@@ -82,17 +110,78 @@ func gpuBuffer(for array: inout [UInt32]) -> MTLBuffer {
     memcpy(buf.contents(), &array, size)
     return buf
 }
+final class BufferPool {
+    private var buckets: [Int: [MTLBuffer]] = [:]
+    private let lock = NSLock()
+
+    private func bucket(for count: Int) -> Int {
+        var size = 64
+        var target = max(count, 1)
+        while size < target {
+            size <<= 1
+        }
+        return size
+    }
+    func acquire(minimumCapacity: Int) -> (MTLBuffer, Int) {
+        if KR_device == nil {
+            kernel_runner_init()
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        let capacity = bucket(for: minimumCapacity)
+        if var existing = buckets[capacity], !existing.isEmpty {
+            let buffer = existing.removeLast()
+            buckets[capacity] = existing
+            return (buffer, capacity)
+        }
+        let buffer = KR_device.makeBuffer(length: capacity * MemoryLayout<Float>.size,
+                                          options: .storageModeShared)!
+        return (buffer, capacity)
+    }
+    func release(buffer: MTLBuffer, capacity: Int) {
+        lock.lock()
+        var existing = buckets[capacity] ?? []
+        existing.append(buffer)
+        buckets[capacity] = existing
+        lock.unlock()
+    }
+}
 public final class DeviceFloatBuffer {
+    private enum Ownership {
+        case owned
+        case pooled(capacity: Int)
+    }
+    private static let pool = BufferPool()
+
     public let buffer: MTLBuffer
-    public let count: Int
+    public private(set) var count: Int
+    public let capacity: Int
+    private let ownership: Ownership
 
     public init(count: Int) {
         if KR_device == nil {
             kernel_runner_init()
         }
         self.count = count
+        self.capacity = count
         self.buffer = KR_device.makeBuffer(length: count * MemoryLayout<Float>.size,
                                            options: .storageModeShared)!
+        self.ownership = .owned
+    }
+    private init(buffer: MTLBuffer, count: Int, capacity: Int, ownership: Ownership) {
+        self.buffer = buffer
+        self.count = count
+        self.capacity = capacity
+        self.ownership = ownership
+    }
+    deinit {
+        if case .pooled(let cap) = ownership {
+            DeviceFloatBuffer.pool.release(buffer: buffer, capacity: cap)
+        }
+    }
+    public static func temporary(count: Int) -> DeviceFloatBuffer {
+        let (buffer, capacity) = pool.acquire(minimumCapacity: count)
+        return DeviceFloatBuffer(buffer: buffer, count: count, capacity: capacity, ownership: .pooled(capacity: capacity))
     }
     public convenience init(_ host: [Float]) {
         self.init(count: host.count)
@@ -138,6 +227,10 @@ public final class DeviceFloatBuffer {
                other.basePointer().advanced(by: sourceOffset),
                copyCount * MemoryLayout<Float>.size)
     }
+    public func updateCount(_ newCount: Int) {
+        precondition(newCount <= capacity, "New count exceeds capacity")
+        count = newCount
+    }
 }
 public func kernel_runner_call(
     _ kernelName: String,
@@ -145,12 +238,8 @@ public func kernel_runner_call(
     gridX: Int, gridY: Int, gridZ: Int,
     tgX: Int, tgY: Int, tgZ: Int
 ) {
-    KR_waitForFreeSlot()
     let pipe = KR_pipeline(kernelName)
-
-    let cmd = KR_queue.makeCommandBuffer()!
-    let enc = cmd.makeComputeCommandEncoder()!
-
+    let enc = KR_obtainEncoder()
     enc.setComputePipelineState(pipe)
 
     // ========================================================
@@ -182,10 +271,10 @@ public func kernel_runner_call(
         MTLSize(width: gridX, height: gridY, depth: gridZ),
         threadsPerThreadgroup: MTLSize(width: tgX, height: tgY, depth: tgZ)
     )
-
-    enc.endEncoding()
-    cmd.commit()
-    KR_inflight.append(cmd)
+    KR_dispatchesInCurrentCommand += 1
+    if KR_dispatchesInCurrentCommand >= KR_maxDispatchesPerBuffer {
+        KR_finishEncoderIfNeeded()
+    }
 }
 public func add(
     _ A: DeviceFloatBuffer,
@@ -206,6 +295,47 @@ public func add(
     ]
     kernel_runner_call(
          "add",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+}
+public func copy(
+    _ A: DeviceFloatBuffer,
+    _ B: DeviceFloatBuffer,
+    _ n: UInt32,
+    _ b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    precondition(B.count == Int(n*b), "B has wrong size")
+    var buffers: [KRBuffer]=[
+        .buffer(A.buffer),
+        .buffer(B.buffer),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+         "copy",
+        buffers: &buffers,
+        gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
+        tgX: 256, tgY: 1, tgZ: 1
+    )
+}
+public func fill(
+    _ A: DeviceFloatBuffer,
+    _ B: Float,
+    _ n: UInt32,
+    _ b: UInt32
+){
+    precondition(A.count == Int(n*b), "A has wrong size")
+    var buffers: [KRBuffer]=[
+        .buffer(A.buffer),
+        .floatVal(B),
+        .uint32Val(n),
+        .uint32Val(b)
+    ]
+    kernel_runner_call(
+        "fill",
         buffers: &buffers,
         gridX: (Int(n)+255)/256, gridY: Int(b), gridZ:1,
         tgX: 256, tgY: 1, tgZ: 1
@@ -508,7 +638,7 @@ public func max_simd(
     var curN = Int(n)
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : DeviceFloatBuffer(count: nextN * batch)
+        let out = nextN == 1 ? B : DeviceFloatBuffer.temporary(count: nextN * batch)
         var buffers: [KRBuffer]=[
             .buffer(cur.buffer),
             .buffer(out.buffer),
@@ -542,7 +672,7 @@ public func sum_simd(
     var curN = Int(n)
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : DeviceFloatBuffer(count: nextN * batch)
+        let out = nextN == 1 ? B : DeviceFloatBuffer.temporary(count: nextN * batch)
         var buffers: [KRBuffer]=[
             .buffer(cur.buffer),
             .buffer(out.buffer),
@@ -577,7 +707,7 @@ public func mean_simd(
     var firstPass = true
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : DeviceFloatBuffer(count: nextN * batch)
+        let out = nextN == 1 ? B : DeviceFloatBuffer.temporary(count: nextN * batch)
         var buffers: [KRBuffer]=[
             .buffer(cur.buffer),
             .buffer(out.buffer),
@@ -614,7 +744,7 @@ public func abs_mean_simd(
     var firstPass = true
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : DeviceFloatBuffer(count: nextN * batch)
+        let out = nextN == 1 ? B : DeviceFloatBuffer.temporary(count: nextN * batch)
         var buffers: [KRBuffer]=[
             .buffer(cur.buffer),
             .buffer(out.buffer),
@@ -754,238 +884,181 @@ public func cortex_step(
     r: UInt32,
     n: UInt32
 ){
-    let H_raw_inter = DeviceFloatBuffer(count: Int(k*r))
+    let H_raw_inter = DeviceFloatBuffer.temporary(count: Int(k*r))
     gemm1(H_t0, A, H_raw_inter, k, n, r, 1)
-    let H_raw_ipt = DeviceFloatBuffer(count: Int(k*n))
+    let H_raw_ipt = DeviceFloatBuffer.temporary(count: Int(k*n))
     gemm2(H_raw_inter, B, H_raw_ipt, k, r, n, 1)
-    let H_raw = DeviceFloatBuffer(count: Int(k*n))
+    let H_raw = DeviceFloatBuffer.temporary(count: Int(k*n))
     softlog(H_raw_ipt, H_raw, 1.7, k*n, 1)
-    let mu = DeviceFloatBuffer(count: Int(n))
+    let mu = DeviceFloatBuffer.temporary(count: Int(n))
     mean_simd(H_raw, mu, k, n)
-    let gamma = DeviceFloatBuffer(count: Int(n))
+    let gamma = DeviceFloatBuffer.temporary(count: Int(n))
     abs_mean_simd(H_raw, gamma, k, n)
-    let H_sub = DeviceFloatBuffer(count: Int(n*k))
+    let H_sub = DeviceFloatBuffer.temporary(count: Int(n*k))
     inhib_sub(H_raw, mu, H_sub, alpha_sub, n, k)
     inhib_div(H_sub, gamma, H_t1, alpha_div, eps, n, k)
 }
-public func fast_oja(
-    A: DeviceFloatBuffer,
-    B: DeviceFloatBuffer,
-    U: DeviceFloatBuffer,
-    V: DeviceFloatBuffer,
-    X: DeviceFloatBuffer,
-    Y: DeviceFloatBuffer,
-    etanull: Float,
+public func fast_oja_correct(
+    U: DeviceFloatBuffer,   // n × r
+    V: DeviceFloatBuffer,   // n × r
+    X: DeviceFloatBuffer,   // k × n  (H_t0)
+    eta: Float,
     k: UInt32,
     n: UInt32,
     r: UInt32
 ){
-    // ---------------------------
-    // 1. softlog(U), softlog(V)
-    // ---------------------------
-    let U_t = DeviceFloatBuffer(count: Int(n*r))
-    let V_t = DeviceFloatBuffer(count: Int(n*r))
-    softlog(U, U_t, 1.7, n, r)
-    softlog(V, V_t, 1.7, n, r)
+    // ------------------------------------------
+    // pU = X U      (k × r)
+    // pV = X V      (k × r)
+    // ------------------------------------------
+    let pU = DeviceFloatBuffer.temporary(count: Int(k * r))
+    let pV = DeviceFloatBuffer.temporary(count: Int(k * r))
 
-    // M = etanull * (U_t ⊙ V_t)
-    let M = DeviceFloatBuffer(count: Int(n*r))
-    mul(U_t, V_t, M, n, r)
+    gemm1(X, U, pU, k, n, r, 1)
+    gemm1(X, V, pV, k, n, r, 1)
 
-    let eta_arr = DeviceFloatBuffer(count: Int(n*r))
-    eta_arr.fill(etanull)
-    mul(M, eta_arr, M, n, r)
+    // ------------------------------------------
+    // dU = Xᵀ pU    (n × r)
+    // dV = Xᵀ pV    (n × r)
+    // ------------------------------------------
+    let dU = DeviceFloatBuffer.temporary(count: Int(n * r))
+    let dV = DeviceFloatBuffer.temporary(count: Int(n * r))
 
-    // ---------------------------
-    // 2. p = X B    (k×n → k×r)
-    // ---------------------------
-    let p = DeviceFloatBuffer(count: Int(k*r))
-    gemm1(X, B, p, k, n, r, 1)
+    gemm3(X, pU, dU, n, k, r, 1)
+    gemm3(X, pV, dV, n, k, r, 1)
 
-    // ---------------------------
-    // 3. q = Y A    (k×n → k×r)
-    // ---------------------------
-    let q = DeviceFloatBuffer(count: Int(k*r))
-    gemm1(Y, A, q, k, n, r, 1)
+    // scale by eta
+    let etaArr = DeviceFloatBuffer.temporary(count: Int(n * r))
+    etaArr.fill(eta)
+    mul(dU, etaArr, dU, n, r)
+    mul(dV, etaArr, dV, n, r)
 
-    // ---------------------------
-    // 4. Yᵀ p , Yᵀ q   (n×k → n×r)
-    // ---------------------------
-    let YTp = DeviceFloatBuffer(count: Int(n*r))
-    let YTq = DeviceFloatBuffer(count: Int(n*r))
-    gemm3(Y, p, YTp, n, k, r, 1)
-    gemm3(Y, q, YTq, n, k, r, 1)
+    // U ← U + dU
+    add(U, dU, U, n, r)
 
-    // ---------------------------
-    // 5. G = Yᵀp − Yᵀq
-    // ---------------------------
-    let G = DeviceFloatBuffer(count: Int(n*r))
-    sub(YTp, YTq, G, n, r)
-
-    // ---------------------------
-    // 6. ΔA = M ⊙ G
-    // ---------------------------
-    let dA = DeviceFloatBuffer(count: Int(n*r))
-    mul(M, G, dA, n, r)
-
-    // ---------------------------
-    // 7. ΔB = M ⊙ G
-    // ---------------------------
-    let dB = DeviceFloatBuffer(count: Int(n*r))
-    mul(M, G, dB, n, r)
-
-    // ---------------------------
-    // 8. Update A and B
-    // ---------------------------
-    add(A, dA, A, n, r)
-    add(B, dB, B, n, r)
+    // V ← V + dV
+    add(V, dV, V, n, r)
 }
-public func slow_oja(
-    U: DeviceFloatBuffer,
-    V: DeviceFloatBuffer,
-    A: DeviceFloatBuffer,
-    B: DeviceFloatBuffer,
-    X: DeviceFloatBuffer,
-    Y: DeviceFloatBuffer,
-    E: DeviceFloatBuffer,      // shape: k
-    eta0: Float,
-    lambda: Float,
-    beta: Float,
+public func slow_oja_correct(
+    U: DeviceFloatBuffer,   // n × r
+    V: DeviceFloatBuffer,   // n × r
+    X: DeviceFloatBuffer,   // k × n
+    eta: Float,
+    k: UInt32,
     n: UInt32,
-    r: UInt32,
-    k: UInt32
+    r: UInt32
 ){
-    // ---------------------------
-    // 0. Global neuromodulatory factor δ
-    // O(k) CPU — negligible
-    // ---------------------------
-    var absSum: Float = 0
-    let err = E.toArray()
-    for i in 0..<Int(k) { absSum += abs(err[i]) }
+    // -------------------------------------------------
+    // 1. pU = X U      (k × r)
+    //    pV = X V      (k × r)
+    // -------------------------------------------------
+    let pU = DeviceFloatBuffer.temporary(count: Int(k * r))
+    let pV = DeviceFloatBuffer.temporary(count: Int(k * r))
 
-    let deltaRaw = absSum / Float(k)
-    let delta = tanh(beta * deltaRaw)
+    gemm1(X, U, pU, k, n, r, 1)
+    gemm1(X, V, pV, k, n, r, 1)
 
-    // ---------------------------
-    // 1. softlog(U), softlog(V)
-    // ---------------------------
-    let U_t = DeviceFloatBuffer(count: Int(n*r))
-    let V_t = DeviceFloatBuffer(count: Int(n*r))
-    softlog(U, U_t, 1.7, n, r)
-    softlog(V, V_t, 1.7, n, r)
+    // -------------------------------------------------
+    // 2. A = Xᵀ pU    (n × r)
+    //    B = Xᵀ pV    (n × r)
+    // -------------------------------------------------
+    let A = DeviceFloatBuffer.temporary(count: Int(n * r))
+    let B = DeviceFloatBuffer.temporary(count: Int(n * r))
 
-    // ---------------------------
-    // 2. M = eta0 * (U_t ⊙ V_t)
-    // ---------------------------
-    let M = DeviceFloatBuffer(count: Int(n*r))
-    mul(U_t, V_t, M, n, r)
+    gemm3(X, pU, A, n, k, r, 1)
+    gemm3(X, pV, B, n, k, r, 1)
 
-    let etaArr = DeviceFloatBuffer(count: Int(n*r))
-    etaArr.fill(eta0)
-    mul(M, etaArr, M, n, r)
+    // -------------------------------------------------
+    // 3. Compute Gram matrices:
+    //    Gu = pUᵀ pU   (r × r)
+    //    Gv = pVᵀ pV   (r × r)
+    // -------------------------------------------------
+    let Gu = DeviceFloatBuffer.temporary(count: Int(r * r))
+    let Gv = DeviceFloatBuffer.temporary(count: Int(r * r))
 
-    // ---------------------------
-    // 3. G = Yᵀ(XB) − Yᵀ(YA)
-    // ---------------------------
-    let p = DeviceFloatBuffer(count: Int(k*r))
-    gemm1(X, B, p, k, n, r, 1)
+    gemm3(pU, pU, Gu, r, k, r, 1)
+    gemm3(pV, pV, Gv, r, k, r, 1)
 
-    let q = DeviceFloatBuffer(count: Int(k*r))
-    gemm1(Y, A, q, k, n, r, 1)
+    // -------------------------------------------------
+    // 4. UGu = U Gu    (n × r)
+    //    VGv = V Gv    (n × r)
+    // -------------------------------------------------
+    let UGu = DeviceFloatBuffer.temporary(count: Int(n * r))
+    let VGv = DeviceFloatBuffer.temporary(count: Int(n * r))
 
-    let YTp = DeviceFloatBuffer(count: Int(n*r))
-    let YTq = DeviceFloatBuffer(count: Int(n*r))
-    gemm3(Y, p, YTp, n, k, r, 1)
-    gemm3(Y, q, YTq, n, k, r, 1)
+    gemm1(U, Gu, UGu, n, r, r, 1)
+    gemm1(V, Gv, VGv, n, r, r, 1)
 
-    let G = DeviceFloatBuffer(count: Int(n*r))
-    sub(YTp, YTq, G, n, r)
+    // -------------------------------------------------
+    // 5. dU = A - UGu
+    //    dV = B - VGv
+    // -------------------------------------------------
+    let dU = DeviceFloatBuffer.temporary(count: Int(n * r))
+    let dV = DeviceFloatBuffer.temporary(count: Int(n * r))
 
-    // ---------------------------
-    // 4. H_fast = M ⊙ G
-    // ---------------------------
-    let H_fast = DeviceFloatBuffer(count: Int(n*r))
-    mul(M, G, H_fast, n, r)
+    sub(A, UGu, dU, n, r)
+    sub(B, VGv, dV, n, r)
 
-    // ---------------------------
-    // 5. S = δ * (H_fast ⊙ G)
-    // ---------------------------
-    let S = DeviceFloatBuffer(count: Int(n*r))
-    mul(H_fast, G, S, n, r)
+    // -------------------------------------------------
+    // 6. Scale updates by η
+    // -------------------------------------------------
+    let etaArr = DeviceFloatBuffer.temporary(count: Int(n * r))
+    etaArr.fill(eta)
 
-    if delta != 0 {
-        let deltaArr = DeviceFloatBuffer(count: Int(n*r))
-        deltaArr.fill(delta)
-        mul(S, deltaArr, S, n, r)
-    }
+    mul(dU, etaArr, dU, n, r)
+    mul(dV, etaArr, dV, n, r)
 
-    // ---------------------------
-    // 6. ΔU = λ * S V
-    // ---------------------------
-    let dU = DeviceFloatBuffer(count: Int(n*r))
-    gemm1(S, V, dU, n, r, r, 1)
-
-    // ---------------------------
-    // 7. ΔV = λ * Sᵀ U
-    // ---------------------------
-    let dV = DeviceFloatBuffer(count: Int(n*r))
-    gemm3(S, U, dV, n, r, r, 1)
-
-    let lamArr = DeviceFloatBuffer(count: Int(n*r))
-    lamArr.fill(lambda)
-    mul(dU, lamArr, dU, n, r)
-    mul(dV, lamArr, dV, n, r)
-
-    // ---------------------------
-    // 8. Update U and V
-    // ---------------------------
+    // -------------------------------------------------
+    // 7. Apply updates
+    // -------------------------------------------------
     add(U, dU, U, n, r)
     add(V, dV, V, n, r)
 }
-public func embedding_oja_update(
-    embeddingRow: DeviceFloatBuffer,
-    error: DeviceFloatBuffer,
+public func embedding_oja_update_correct(
+    embeddingRow: DeviceFloatBuffer,   // e: n × 1
+    error: DeviceFloatBuffer,          // x: n × 1
     eta: Float,
-    alpha: Float,
     n: UInt32
 ){
     precondition(embeddingRow.count == Int(n))
     precondition(error.count == Int(n))
 
-    // -------------------------------------------------
-    // 1. err ⊙ e
-    // -------------------------------------------------
-    let hebb = DeviceFloatBuffer(count: Int(n))
-    mul(error, embeddingRow, hebb, n, 1)
+    // ---------------------------------------------
+    // 1. Compute dot = eᵀ x   (scalar)
+    // ---------------------------------------------
+    let prod = DeviceFloatBuffer.temporary(count: Int(n))
+    mul(embeddingRow, error, prod, n, 1)   // prod[i] = e[i] * x[i]
 
-    // -------------------------------------------------
-    // 2. e ⊙ e  (normalization term)
-    // -------------------------------------------------
-    let ee = DeviceFloatBuffer(count: Int(n))
-    mul(embeddingRow, embeddingRow, ee, n, 1)
+    let dot = DeviceFloatBuffer(count: 1)
+    sum_simd(prod, dot, n, 1)              // dot = Σ_i e[i] * x[i]
 
-    // -------------------------------------------------
-    // 3. G = hebb − α * ee
-    // -------------------------------------------------
-    let scaled_ee = DeviceFloatBuffer(count: Int(n))
-    scaled_ee.fill(alpha)
-    mul(ee, scaled_ee, scaled_ee, n, 1)
+    // ---------------------------------------------
+    // 2. Compute d * e
+    // ---------------------------------------------
+    let dot_broadcast = DeviceFloatBuffer.temporary(count: Int(n))
+    dot_broadcast.fill(dot.toArray()[0])
 
-    let G = DeviceFloatBuffer(count: Int(n))
-    sub(hebb, scaled_ee, G, n, 1)
+    let scaled_e = DeviceFloatBuffer.temporary(count: Int(n))
+    mul(embeddingRow, dot_broadcast, scaled_e, n, 1)  // scaled_e = d * e
 
-    // -------------------------------------------------
-    // 4. Δe = η * G
-    // -------------------------------------------------
-    let eta_arr = DeviceFloatBuffer(count: Int(n))
+    // ---------------------------------------------
+    // 3. delta = x - scaled_e
+    // ---------------------------------------------
+    let delta = DeviceFloatBuffer.temporary(count: Int(n))
+    sub(error, scaled_e, delta, n, 1)
+
+    // ---------------------------------------------
+    // 4. Δe = η * delta
+    // ---------------------------------------------
+    let eta_arr = DeviceFloatBuffer.temporary(count: Int(n))
     eta_arr.fill(eta)
-    let dE = DeviceFloatBuffer(count: Int(n))
-    mul(G, eta_arr, dE, n, 1)
 
-    // -------------------------------------------------
+    mul(delta, eta_arr, delta, n, 1)
+
+    // ---------------------------------------------
     // 5. e ← e + Δe
-    // -------------------------------------------------
-    add(embeddingRow, dE, embeddingRow, n, 1)
+    // ---------------------------------------------
+    add(embeddingRow, delta, embeddingRow, n, 1)
 }
 let alpha_s: Float=0.05
 let alpha_d: Float=0.10
@@ -1040,7 +1113,7 @@ public func use_up_token(
     lambda: Float,
     beta: Float
 ){
-    let token = DeviceFloatBuffer(count: Int(k))
+    let token = DeviceFloatBuffer.temporary(count: Int(k))
     var idxArr: [UInt32] = [idx]
     embedding(
         embedding_matrix,
@@ -1050,7 +1123,7 @@ public func use_up_token(
         k,
         vocab_size
     )
-    let expected = DeviceFloatBuffer(count: Int(k))
+    let expected = DeviceFloatBuffer.temporary(count: Int(k))
     idxArr = [expected_idx]
     embedding(
         embedding_matrix,
@@ -1078,9 +1151,9 @@ public func use_up_token(
         r: r,
         n: n
     )
-    let pred = DeviceFloatBuffer(count: Int(k))
+    let pred = DeviceFloatBuffer.temporary(count: Int(k))
     pred.copy(from: H_t1, sourceOffset: 0, targetOffset: 0, count: Int(k))
-    let E = DeviceFloatBuffer(count: Int(k))
+    let E = DeviceFloatBuffer.temporary(count: Int(k))
     sub(expected, pred, E, k, 1)
     fast_oja(
         A: A,
@@ -1110,7 +1183,7 @@ public func use_up_token(
         k: k
     )
     let base = Int(idx) * Int(k)
-    let emb_row = DeviceFloatBuffer(count: Int(k))
+    let emb_row = DeviceFloatBuffer.temporary(count: Int(k))
     emb_row.copy(from: embedding_matrix, sourceOffset: base, targetOffset: 0, count: Int(k))
     embedding_oja_update(
         embeddingRow: emb_row,
@@ -1122,4 +1195,44 @@ public func use_up_token(
     embedding_matrix.copy(from: emb_row, sourceOffset: 0, targetOffset: base, count: Int(k))
     H_t0.copy(from: H_t1)
 }
+public func benchmarkTrainingStep(
+    sequenceLength: Int = 150_000,
+    vocabSize: UInt32 = 267_735
+) {
+    print("---- Benchmarking step (seq=\(sequenceLength), vocab=\(vocabSize)) ----")
+    kernel_runner_synchronize()
+    let embeddingMatrix = DeviceFloatBuffer(count: Int(vocabSize) * Int(k))
+    embeddingMatrix.fill(0)
+    let tokenSeq = (0..<sequenceLength).map { _ in UInt32.random(in: 0..<vocabSize) }
+    let targetSeq = (0..<sequenceLength).map { _ in UInt32.random(in: 0..<vocabSize) }
+
+    let start = DispatchTime.now().uptimeNanoseconds
+    for i in 0..<sequenceLength {
+        use_up_token(
+            H_t0: H_t0,
+            H_t1: H_t1,
+            expected_idx: targetSeq[i],
+            embedding_matrix: embeddingMatrix,
+            vocab_size: vocabSize,
+            k: k,
+            idx: tokenSeq[i],
+            n: n,
+            A: A,
+            B: B,
+            U: U,
+            V: V,
+            etanull: etanull,
+            eta0: eta0,
+            lambda: lambda,
+            beta: beta
+        )
+    }
+    kernel_runner_synchronize()
+    let end = DispatchTime.now().uptimeNanoseconds
+    let elapsed = Double(end - start) / 1_000_000_000.0
+    let tokensPerSec = Double(sequenceLength) / max(elapsed, 1e-9)
+    print(String(format: "Elapsed: %.2fs, throughput: %.1f tokens/s", elapsed, tokensPerSec))
+    print("---------------------------------------------------------------")
+}
 kernel_runner_init()
+benchmarkTrainingStep()

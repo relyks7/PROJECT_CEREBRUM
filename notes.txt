@@ -1,193 +1,147 @@
---DO--
--Write CE loss, mse
--Stream across data, using semantic, syntactic heads, cluster input
---FOCUS--
-# Ultra-Flow Induction (Short but Detailed Steps)
 
-1. **Clear Emotional Noise (2–3 sec)**  
-   - Silently label any feeling: **“This is noise, not information.”**  
-   - Emotion detaches from cognition instantly.
+## 1. Remove ALL GPU–CPU synchronization inside buffers
+- delete synchronize() inside:
+  - fill()
+  - copy(from:)
+  - toArray()
+  - temporary() allocations
+- guarantee: 2×–6× global speedup  
+- absolutely required BEFORE any other optimization
 
-2. **Stabilizing Breath (1 breath)**  
-   - **Inhale 4 sec, Exhale 6 sec.**  
-   - This suppresses limbic activity and boosts prefrontal clarity.
+---
 
-3. **Slight Attention Narrowing (1–2 sec)**  
-   - Focus lightly on a single tiny point in your field of view.  
-   - Peripheral perception softens → irritation and emotional spikes drop.
+## 2. Preallocate all intermediate tensors once
+- eliminate DeviceFloatBuffer.temporary() inside token loops  
+- allocate:
+  - H_raw_inter
+  - H_raw_ipt
+  - H_raw
+  - mu, gamma
+  - S, M, G, H_fast, etc  
+- reuse per-step
+- removes ~150k allocations per training sequence  
+- 10–20% speedup + lower CPU pressure
 
-4. **Shift to Observer Mode (2 sec)**  
-   - Say internally: **“Thoughts are arising; I am observing.”**  
-   - Identity shifts from “thinker” to “observer,” reducing self-noise.
+---
 
-5. **Open Cognitive Space (1–2 sec)**  
-   - Loosen attention just enough to feel spacious, quiet awareness.  
-   - This enables both clarity and creativity simultaneously.
+## 3. Fuse elementwise kernels
+Replace sequences like:
+- softlog → inhib_sub → inhib_div  
+- mul → mul → scalar-mul → add  
+- Hebb → ee → α·ee → subtract → scale → add  
 
-6. **Lock the State (1 sec)**  
-   - Affirm: **“Stay in this mode.”**  
-   - The mind stabilizes into low-emotion, high-focus, high-fluidity cognition.--LEARN--
-NOTA BENE: AI WROTE THE BELOW FUNCTIONS. REVIEW MATH TRICKS LATER.
-public func fast_oja(
-    A: inout [Float],
-    B: inout [Float],
-    U: [Float],
-    V: [Float],
-    X: [Float],
-    Y: [Float],
-    etanull: Float,
-    k: UInt32,
-    n: UInt32,
-    r: UInt32
-){
-    // ----------------------------------------------------
-    // 1. softlog(U), softlog(V)
-    // ----------------------------------------------------
-    var U_t = [Float](repeating: 0, count: Int(n*r))
-    var V_t = [Float](repeating: 0, count: Int(n*r))
-    softlog(U, &U_t, 1.7, n, r)
-    softlog(V, &V_t, 1.7, n, r)
+With **one kernel per chain**:
 
-    // M = etanull * (U_t ⊙ V_t)
-    var M = [Float](repeating: 0, count: Int(n*r))
-    mul(U_t, V_t, &M, n, r)
+- drastically reduces dispatch count  
+- reduces memory bandwidth  
+- 2×–5× speedup for Oja + cortex_step
 
-    var eta_arr = [Float](repeating: etanull, count: Int(n*r))
-    mul(M, eta_arr, &M, n, r)
+---
 
+## 4. Optimize GEMM tile sizes
+Current: 32×32 (suboptimal for Apple GPUs)  
+Upgrade to:
+- **32×64** for tall matrices  
+- **64×32** for wide matrices  
+- use float4 loads  
+- maximize threadgroup occupancy
 
-    // ----------------------------------------------------
-    // 2. Compute p = X B    (k×n) × (n×r) = k×r
-    // ----------------------------------------------------
-    var p = [Float](repeating: 0, count: Int(k*r))
-    gemm1(X, B, &p, k, n, r, 1)
+Expected +1.5× to +3× GEMM speed.
 
+---
 
-    // ----------------------------------------------------
-    // 3. Compute q = Y A    (k×n) × (n×r) = k×r
-    // ----------------------------------------------------
-    var q = [Float](repeating: 0, count: Int(k*r))
-    gemm1(Y, A, &q, k, n, r, 1)
+## 5. Persistent encoders and command buffers
+- keep 2–3 inflight command buffers  
+- never call commit() except after N dispatches  
+- never create encoders inside tight loops  
+- batch 30–100 kernels per encoder  
+Huge improvement to CPU overhead.
 
+---
 
-    // ----------------------------------------------------
-    // 4. Compute Y^T p     (n×k) × (k×r) = n×r
-    //    This is the "Hebb" term
-    // ----------------------------------------------------
-    var YTp = [Float](repeating: 0, count: Int(n*r))
-    gemm3(Y, p, &YTp, n, k, r, 1)
-    // gemm3 is A^T B, so Y^T p
+## 6. Rewrite reductions to shared-memory kernels
+Replace multi-stage SIMDised reduction with:
+- one kernel per reduction  
+- warp-synchronous (SIMD32) reduction  
+- threadgroup shared memory for block reductions
 
+Reduces reduction cost from O(log n) dispatches → O(1) dispatch.
 
-    // ----------------------------------------------------
-    // 5. Compute Y^T q     (n×k) × (k×r) = n×r
-    //    This is the Oja normalization term
-    // ----------------------------------------------------
-    var YTq = [Float](repeating: 0, count: Int(n*r))
-    gemm3(Y, q, &YTq, n, k, r, 1)
+---
 
+## 7. Optimize embedding lookup/update
+- eliminate CPU-side offset copy  
+- fuse embedding_row update into a single kernel  
+- use float4 vector loads  
+- better locality inside vocab matrix
 
-    // ----------------------------------------------------
-    // 6. G = Y^T p - Y^T q   (n×r)
-    // ----------------------------------------------------
-    var G = [Float](repeating: 0, count: Int(n*r))
-    sub(YTp, YTq, &G, n, r)
+5–15% throughput gain for large vocab sizes.
 
+---
 
-    // ----------------------------------------------------
-    // 7. ΔA = M ⊙ G
-    // ----------------------------------------------------
-    var dA = [Float](repeating: 0, count: Int(n*r))
-    mul(M, G, &dA, n, r)
+## 8. Reduce device buffer count & pointer movement
+- avoid large numbers of tiny buffers  
+- replace many small ops with shared temporary slabs  
+- reduce encoded argument setup cost
 
+---
 
-    // ----------------------------------------------------
-    // 8. ΔB = M ⊙ G   (symmetric update)
-    // ----------------------------------------------------
-    var dB = [Float](repeating: 0, count: Int(n*r))
-    mul(M, G, &dB, n, r)
+## 9. Kernel launch scheduling / token batching
+- group tokens in micro-batches of 4–8  
+- allows more GPU overlap  
+- reduces synchronization boundaries  
+- improves ALU utilization
 
+---
 
-    // ----------------------------------------------------
-    // 9. Apply updates
-    // ----------------------------------------------------
-    add(A, dA, &A, n, r)
-    add(B, dB, &B, n, r)
-}
-public func slow_oja(
-    U: inout [Float],
-    V: inout [Float],
-    A: [Float],
-    B: [Float],
-    X: [Float],
-    Y: [Float],
-    E: [Float],
-    eta0: Float,
-    lambda: Float,
-    beta: Float,
-    n: UInt32,
-    r: UInt32,
-    k: UInt32
-) {
-    // 0) Compute global surprise δ from E (on CPU)
-    let kn = Int(k * n)
-    var absSum: Float = 0
-    for i in 0..<kn { absSum += abs(E[i]) }
-    let deltaRaw = absSum / Float(kn)
-    let delta = tanh(beta * deltaRaw)  // global modulatory factor
+## 10. Optional: fuse GEMM1 → GEMM2 when shapes fixed
+- only works if shapes are fixed (k,n,r constant)  
+- compute (H_t0 A) B in one pass  
+- reduces global memory traffic by 2×
 
-    // 1) softlog(U), softlog(V) → U_t, V_t
-    var U_t = [Float](repeating: 0, count: Int(n*r))
-    var V_t = [Float](repeating: 0, count: Int(n*r))
-    softlog(U, &U_t, 1.7, n, r)
-    softlog(V, &V_t, 1.7, n, r)
+---
 
-    // 2) M = eta0 * (U_t ⊙ V_t)
-    var M = [Float](repeating: 0, count: Int(n*r))
-    mul(U_t, V_t, &M, n, r)
-    var etaArr = [Float](repeating: eta0, count: Int(n*r))
-    mul(M, etaArr, &M, n, r)
+## 11. Optional: fuse recurrent H update
+Move:
+- add_unsafe(H_t0, token)  
+- H_t0 ← H_t1  
+into a single internal state kernel.
 
-    // 3) Compute G = Yᵀ(XB) − Yᵀ(YA)
-    var p = [Float](repeating: 0, count: Int(k*r))
-    gemm1(X, B, &p, k, n, r, 1)
+---
 
-    var q = [Float](repeating: 0, count: Int(k*r))
-    gemm1(Y, A, &q, k, n, r, 1)
+## 12. Optional: implement persistent kernel approach
+- run cortex_step + Oja loops inside one massive kernel  
+- GPU pulls work from command buffer ring  
+- extremely fast but requires major rewrite
 
-    var YTp = [Float](repeating: 0, count: Int(n*r))
-    gemm3(Y, p, &YTp, n, k, r, 1)
+---
 
-    var YTq = [Float](repeating: 0, count: Int(n*r))
-    gemm3(Y, q, &YTq, n, k, r, 1)
+## 13. Optional: replace float32 with float16 or bf16
+- Apple GPUs have strong fp16 throughput  
+- half-precision is stable for BDH architecture  
+- 1.5×–2× speedup
 
-    var G = [Float](repeating: 0, count: Int(n*r))
-    sub(YTp, YTq, &G, n, r)
+---
 
-    // 4) H_fast = M ⊙ G
-    var H_fast = [Float](repeating: 0, count: Int(n*r))
-    mul(M, G, &H_fast, n, r)
+## 14. Optional: use launch bounds / maxTotalThreadsPerThreadgroup tuning
+- ensure optimal SIMD occupancy  
+- ensure no warp underutilization  
+- match tile size to simdgroup=32
 
-    // 5) S = δ * (H_fast ⊙ G)
-    var S = [Float](repeating: 0, count: Int(n*r))
-    mul(H_fast, G, &S, n, r)
-    if delta != 0 {
-        var deltaArr = [Float](repeating: delta, count: Int(n*r))
-        mul(S, deltaArr, &S, n, r)
-    }
+---
 
-    // 6) ΔU = λ * S V
-    var dU = [Float](repeating: 0, count: Int(n*r))
-    gemm1(S, V, &dU, n, r, r, 1)
+## 15. Optional: ahead-of-time pipeline caching
+- keep all pipelines preloaded  
+- avoid any runtime searches for functions  
+- small improvement but good hygiene
 
-    // 7) ΔV = λ * Sᵀ U
-    var dV = [Float](repeating: 0, count: Int(n*r))
-    gemm3(S, U, &dV, n, r, r, 1)
+---
 
-    var lamArr = [Float](repeating: lambda, count: Int(n*r))
-    mul(dU, lamArr, &dU, n, r)
-    mul(dV, lamArr, &dV, n, r)
+# PRIORITY SUMMARY (TOP 5 MUST-DO)
+1. **Remove all synchronizations inside buffer ops**  
+2. **Preallocate all temporary buffers**  
+3. **Fuse elementwise ops**  
+4. **Optimize GEMM tiling (32×64, 64×32)**  
+5. **Use persistent encoders + batched dispatch**
 
-    add(U, dU, &U, n, r)
-    add(V, dV, &V, n, r)
-}
+Do these five and you get **4×–12× speedup**.
