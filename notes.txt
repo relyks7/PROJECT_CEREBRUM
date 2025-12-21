@@ -1,147 +1,388 @@
+# CORTEX-PRIME — Complete Mathematical Specification (Bio-Aligned, Locally Implementable)
 
-## 1. Remove ALL GPU–CPU synchronization inside buffers
-- delete synchronize() inside:
-  - fill()
-  - copy(from:)
-  - toArray()
-  - temporary() allocations
-- guarantee: 2×–6× global speedup  
-- absolutely required BEFORE any other optimization
+This document defines the **minimal, irreducible cortical computation** as a standalone mathematical object.
 
----
+Everything here corresponds to known cortical principles.
 
-## 2. Preallocate all intermediate tensors once
-- eliminate DeviceFloatBuffer.temporary() inside token loops  
-- allocate:
-  - H_raw_inter
-  - H_raw_ipt
-  - H_raw
-  - mu, gamma
-  - S, M, G, H_fast, etc  
-- reuse per-step
-- removes ~150k allocations per training sequence  
-- 10–20% speedup + lower CPU pressure
+Nothing here relies on gradients, losses, tokens, or optimization objectives.
+
+All operations are **local or low-rank**, with no global synchronization primitives.
 
 ---
 
-## 3. Fuse elementwise kernels
-Replace sequences like:
-- softlog → inhib_sub → inhib_div  
-- mul → mul → scalar-mul → add  
-- Hebb → ee → α·ee → subtract → scale → add  
+## 1. State (Only State That Exists)
 
-With **one kernel per chain**:
+\[
+H_t \in \mathbb{R}^{k \times n}
+\]
 
-- drastically reduces dispatch count  
-- reduces memory bandwidth  
-- 2×–5× speedup for Oja + cortex_step
+- \(n\): number of cortical neurons  
+- \(k\): internal vector state per neuron  
 
----
-
-## 4. Optimize GEMM tile sizes
-Current: 32×32 (suboptimal for Apple GPUs)  
-Upgrade to:
-- **32×64** for tall matrices  
-- **64×32** for wide matrices  
-- use float4 loads  
-- maximize threadgroup occupancy
-
-Expected +1.5× to +3× GEMM speed.
+Each neuron is **vector-valued**, not scalar.  
+There are no layers, no heads, no modules.
 
 ---
 
-## 5. Persistent encoders and command buffers
-- keep 2–3 inflight command buffers  
-- never call commit() except after N dispatches  
-- never create encoders inside tight loops  
-- batch 30–100 kernels per encoder  
-Huge improvement to CPU overhead.
+## 2. Input (Broadcast Injection)
+
+Input enters cortex diffusely:
+
+\[
+H_t \leftarrow H_t + E_t
+\]
+
+Where:
+- \(E_t \in \mathbb{R}^{k \times n}\) is a broadcast input field
+- Often low-rank or spatially smooth
+- No addressing, no selection, no routing
+
+Cortex does **not** decide where input goes.  
+Competition decides what survives.
 
 ---
 
-## 6. Rewrite reductions to shared-memory kernels
-Replace multi-stage SIMDised reduction with:
-- one kernel per reduction  
-- warp-synchronous (SIMD32) reduction  
-- threadgroup shared memory for block reductions
+## 3. Fixed Cortical Dynamics
 
-Reduces reduction cost from O(log n) dispatches → O(1) dispatch.
+### 3.1 Recurrent Mixing (Low-Rank Coupling)
 
----
+\[
+X = H_t \, A \, B
+\]
 
-## 7. Optimize embedding lookup/update
-- eliminate CPU-side offset copy  
-- fuse embedding_row update into a single kernel  
-- use float4 vector loads  
-- better locality inside vocab matrix
+- \(A \in \mathbb{R}^{n \times r}\)
+- \(B \in \mathbb{R}^{r \times n}\)
+- \(r \ll n\)
 
-5–15% throughput gain for large vocab sizes.
+Interpretation:
+- diffuse recurrent connectivity
+- shared microcircuits
+- dendritic mixing
 
----
-
-## 8. Reduce device buffer count & pointer movement
-- avoid large numbers of tiny buffers  
-- replace many small ops with shared temporary slabs  
-- reduce encoded argument setup cost
+Low-rank structure enforces:
+- parameter efficiency
+- linear-time computation
+- global coordination without global access
 
 ---
 
-## 9. Kernel launch scheduling / token batching
-- group tokens in micro-batches of 4–8  
-- allows more GPU overlap  
-- reduces synchronization boundaries  
-- improves ALU utilization
+### 3.1b Sparse Long-Range Connectivity (Small-World Completion)
+
+In addition to low-rank coordination, the cortical sheet includes a **sparse set of long-range excitatory connections**.
+
+Let:
+\[
+S^{LR} \in \mathbb{R}^{n \times n}
+\]
+
+with properties:
+- sparsity: \(\mathbb{P}(S^{LR}_{ij} \neq 0) = O(\log n / n)\)
+- nonnegative weights
+- no global density (bounded degree)
+- plastic on a **slow timescale** under the same Hebbian rule
+
+The effective recurrent drive becomes:
+\[
+X = H_t (A B + S^{LR})
+\]
+
+This ensures:
+- short average path length
+- rapid global information propagation
+- biologically realistic small-world topology
+
+No explicit structure is imposed beyond sparsity and plasticity.
 
 ---
 
-## 10. Optional: fuse GEMM1 → GEMM2 when shapes fixed
-- only works if shapes are fixed (k,n,r constant)  
-- compute (H_t0 A) B in one pass  
-- reduces global memory traffic by 2×
+### 3.2 Neuronal Saturation (Excitation Control)
+
+\[
+H_{\text{raw}} = X \odot \phi(|X|)
+\]
+
+Where:
+- \(\phi(z)\) is saturating (e.g. \(\tanh(z)\), \(\log(1+z)\))
+- \(\odot\) is elementwise multiplication
+
+Purpose:
+- bound activity
+- prevent runaway excitation
+- preserve relative magnitudes
 
 ---
 
-## 11. Optional: fuse recurrent H update
-Move:
-- add_unsafe(H_t0, token)  
-- H_t0 ← H_t1  
-into a single internal state kernel.
+### 3.3 Lateral Inhibition (Local, Not Global)
+
+Cortex does **not** compute global means.  
+Each neuron is inhibited by a **local neighborhood**.
+
+#### Spatial structure
+Neurons are indexed by position \(i\) on a cortical sheet.
+
+Let \(K_{ij}\) be a fixed local inhibitory kernel:
+- Gaussian
+- difference-of-Gaussians
+- compact support
+
+#### Subtractive inhibition (local mean)
+
+\[
+\mu_i
+=
+\sum_{j \in \mathcal{N}(i)} K_{ij}\, H_{\text{raw},j}
+\]
+
+#### Divisive inhibition (local gain control)
+
+\[
+\gamma_i
+=
+\sum_{j \in \mathcal{N}(i)} K_{ij}\, |H_{\text{raw},j}|
+\]
+
+#### State update (per neuron)
+
+\[
+H_{t+1,i}
+=
+\frac{H_{\text{raw},i} - \alpha \mu_i}{\epsilon + \beta \gamma_i}
+\]
+
+Effects:
+- neurons compete locally
+- sparse representations emerge
+- scale is stabilized
+- global balance emerges **statistically**, not explicitly
+
+> Representation = neurons that survive **local** inhibition.
 
 ---
 
-## 12. Optional: implement persistent kernel approach
-- run cortex_step + Oja loops inside one massive kernel  
-- GPU pulls work from command buffer ring  
-- extremely fast but requires major rewrite
+## 4. Prediction (Implicit, Not Supervised)
+
+Cortex predicts **its own next state**:
+
+\[
+H_t \rightarrow H_{t+1}
+\]
+
+No logits.  
+No probabilities.  
+No explicit outputs required.
+
+Optional diagnostic readout:
+
+\[
+\delta = H_{t+1}^{(\text{readout})} - \text{target}
+\]
+
+- \(\delta\) is a vector
+- local
+- never backpropagated
 
 ---
 
-## 13. Optional: replace float32 with float16 or bf16
-- Apple GPUs have strong fp16 throughput  
-- half-precision is stable for BDH architecture  
-- 1.5×–2× speedup
+## 5. Learning Rule (Single Hebbian Plasticity)
+
+### 5.1 Hebbian Update (Oja-Style)
+
+Let:
+\[
+X = H_t,\quad Y = H_{t+1}
+\]
+
+Core Hebbian form:
+\[
+\Delta W \propto X Y^\top
+\]
+
+Stabilized (Oja):
+\[
+\Delta W \propto X Y^\top - Y Y^\top W
+\]
+
+Properties:
+- strengthens correlated activity
+- suppresses redundancy
+- prevents divergence
 
 ---
 
-## 14. Optional: use launch bounds / maxTotalThreadsPerThreadgroup tuning
-- ensure optimal SIMD occupancy  
-- ensure no warp underutilization  
-- match tile size to simdgroup=32
+### 5.2 Low-Rank Plasticity (Biological Constraint)
+
+Connectivity factorization:
+\[
+W = A B
+\]
+
+Plasticity acts only through low-rank factors:
+
+\[
+\Delta A
+=
+\eta_t \odot
+\left(
+Y^\top (X B^\top - Y A)
+\right)
+\]
+
+- local
+- symmetric
+- linear-time
+- biologically plausible
 
 ---
 
-## 15. Optional: ahead-of-time pipeline caching
-- keep all pipelines preloaded  
-- avoid any runtime searches for functions  
-- small improvement but good hygiene
+### 5.3 Sparse Long-Range Plasticity (Slow Timescale)
+
+For \(S^{LR}\), apply the **same Hebbian rule** but with:
+- much smaller \(\eta^{LR}\)
+- optional activity thresholding
+- infrequent updates
+
+This mirrors white-matter tract refinement and developmental pruning.
 
 ---
 
-# PRIORITY SUMMARY (TOP 5 MUST-DO)
-1. **Remove all synchronizations inside buffer ops**  
-2. **Preallocate all temporary buffers**  
-3. **Fuse elementwise ops**  
-4. **Optimize GEMM tiling (32×64, 64×32)**  
-5. **Use persistent encoders + batched dispatch**
+## 6. Neuromodulation (Explicit Chemical Field Definition)
 
-Do these five and you get **4×–12× speedup**.
+Learning rate is **not an objective**.  
+It is gated by **chemical fields**.
+
+### 6.1 Chemical Signals
+
+Neuromodulators are spatial fields:
+
+\[
+\text{DA}_t,\ \text{ACh}_t,\ \text{NE}_t,\ \text{5HT}_t \in \mathbb{R}^{n}
+\]
+
+Interpretation:
+- **DA** → reinforcement / association
+- **ACh** → plasticity & attention
+- **NE** → arousal / gain
+- **5-HT** → stability / consolidation
+
+---
+
+### 6.2 Rank Profiles (Fixed Wiring)
+
+Each chemical modulates plasticity along low-rank axes:
+
+\[
+d_{\text{DA}}, d_{\text{ACh}}, d_{\text{NE}}, d_{\text{5HT}} \in \mathbb{R}^{r}
+\]
+
+Baseline:
+\[
+b \in \mathbb{R}^{r}
+\]
+
+These are **fixed organism parameters**.
+
+---
+
+### 6.3 Explicit Definition of \(f\)
+
+Pre-gated plasticity field:
+
+\[
+Z_t
+=
+\text{DA}_t d_{\text{DA}}^\top
++
+\text{ACh}_t d_{\text{ACh}}^\top
++
+\text{NE}_t d_{\text{NE}}^\top
++
+\text{5HT}_t d_{\text{5HT}}^\top
++
+\mathbf{1}_n b^\top
+\quad \in \mathbb{R}^{n \times r}
+\]
+
+Neuromodulated learning-rate field:
+
+\[
+\boxed{
+\eta_t
+=
+\eta_{\max}\, \sigma(Z_t)
+}
+\]
+
+Where:
+- \(\sigma\) is elementwise sigmoid
+- \(\eta_{\max} > 0\) bounds plasticity
+
+Plasticity is **chemically gated, spatially structured, and low-rank**.
+
+---
+
+## 7. Stabilization (Biological Necessity)
+
+### Weight normalization
+
+\[
+A \leftarrow \frac{A}{\|A\|}
+\]
+
+### Synaptic decay
+
+\[
+A \leftarrow (1 - \lambda) A
+\]
+
+Represents:
+- synaptic turnover
+- homeostasis
+- forgetting
+
+---
+
+## 8. Computational Properties
+
+- Time complexity: **O(n)** (bounded-degree graph + low-rank terms)  
+- No gradients  
+- No loss minimization  
+- No global objective  
+- No global synchronization  
+- Stable under infinite input  
+
+---
+
+## 9. What This Is
+
+- A **cortical prime**
+- A homogeneous recurrent sheet
+- Predictive
+- Competitive
+- Self-organizing
+- Small-world-capable without hardcoding structure
+
+---
+
+## 10. What This Is Not
+
+- Not cognition
+- Not grammar
+- Not planning
+- Not consciousness
+
+Those require **closed loops** with:
+- thalamus (gating)
+- basal ganglia (selection)
+- hippocampus (memory)
+- body/environment (grounding)
+
+---
+
+## Final Reduction
+
+Everything cortex contributes is here.
+
+Remove anything → it stops being cortex.  
+Add anything → you are building around cortex.
+
+This is the **irreducible cortical atom**.
