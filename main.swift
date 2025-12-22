@@ -1070,6 +1070,7 @@ public func inhib_div_r7(
 }
 public func cortex_step(
     stream: ComputeStream,
+    _ E_t: GPUBuffer <Float>,
     _ H_t0: GPUBuffer <Float>,
     _ A: GPUBuffer <Float>,
     _ B: GPUBuffer <Float>,
@@ -1112,6 +1113,7 @@ public func cortex_step(
     stream.dispatch(
         kernel: "cortex_step",
         args: [
+            .buffer(E_t.buffer),
             .buffer(H_t1.buffer),
             .buffer(X_g.buffer),
             .buffer(X_m.buffer),
