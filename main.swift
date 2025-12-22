@@ -183,6 +183,46 @@ public func add(
         )
     )
 }
+public func add4(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ D: GPUBuffer <Float>,
+    _ E: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    precondition(D.count == Int(n_*b_), "D has wrong size")
+    precondition(E.count == Int(n_*b_), "E has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "add4",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            .buffer(D.buffer),
+            .buffer(E.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
 public func copy(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -239,8 +279,8 @@ public func transpose(
             depth: 1
         ),
         threads: MTLSize(
-            width: 64,
-            height: 64,
+            width: 32,
+            height: 32,
             depth: 1
         )
     )
@@ -617,6 +657,8 @@ public func outer_prod(
 public func max_simd(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
     _ n_: UInt32,
     _ b_: UInt32
@@ -626,9 +668,16 @@ public func max_simd(
     let batch = Int(b_)
     var cur = A
     var curN = Int(n_)
+    var toggle=false
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : GPUBuffer<Float>(device: stream.device, capacity: nextN * batch)
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            out=toggle?scratch0:scratch1
+            toggle.toggle()
+        }
         var n = UInt32(curN)
         var b = b_
         stream.dispatch(
@@ -658,6 +707,8 @@ public func max_simd(
 public func sum_simd(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
     _ n_: UInt32,
     _ b_: UInt32
@@ -667,9 +718,16 @@ public func sum_simd(
     let batch = Int(b_)
     var cur = A
     var curN = Int(n_)
+    var toggle=false
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : GPUBuffer<Float>(device: stream.device, capacity: nextN * batch)
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            out=toggle?scratch0:scratch1
+            toggle.toggle()
+        }
         var n = UInt32(curN)
         var b = b_
         stream.dispatch(
@@ -699,6 +757,8 @@ public func sum_simd(
 public func mean_simd(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
     _ n_: UInt32,
     _ b_: UInt32
@@ -708,9 +768,16 @@ public func mean_simd(
     let batch = Int(b_)
     var cur = A
     var curN = Int(n_)
+    var toggle=false
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : GPUBuffer<Float>(device: stream.device, capacity: nextN * batch)
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            out=toggle?scratch0:scratch1
+            toggle.toggle()
+        }
         var n = UInt32(curN)
         var b = b_
         stream.dispatch(
@@ -740,6 +807,8 @@ public func mean_simd(
 public func abs_mean_simd(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
     _ n_: UInt32,
     _ b_: UInt32
@@ -749,9 +818,16 @@ public func abs_mean_simd(
     let batch = Int(b_)
     var cur = A
     var curN = Int(n_)
+    var toggle=false
     while curN > 1 {
         let nextN = (curN + 127) / 128
-        let out = nextN == 1 ? B : GPUBuffer<Float>(device: stream.device, capacity: nextN * batch)
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            out=toggle?scratch0:scratch1
+            toggle.toggle()
+        }
         var n = UInt32(curN)
         var b = b_
         stream.dispatch(
@@ -777,4 +853,286 @@ public func abs_mean_simd(
         cur = out
         curN = nextN
     }
+}
+public func conv_r3(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 7, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "conv_r3",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func conv_r5(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 11, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "conv_r5",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func conv_r7(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 15, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "conv_r7",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func conv_r11(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 23, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "conv_r11",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func inhib_sub_r3(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ scratch0: GPUBuffer <Float>,
+    _ scratch1: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 7, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_), "C has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "inhib_sub_r3",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+    sum_simd(stream: stream, B, scratch0, scratch1, C, n_, b_);
+}
+public func inhib_div_r7(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ scratch0: GPUBuffer <Float>,
+    _ scratch1: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(W.count == 15, "W has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_), "C has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "inhib_div_r7",
+        args: [
+            .buffer(A.buffer),
+            .buffer(W.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 127) / 128,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 128,
+            height: 1,
+            depth: 1
+        )
+    )
+    sum_simd(stream: stream, B, scratch0, scratch1, C, n_, b_);
+}
+public func cortex_step(
+    stream: ComputeStream,
+    _ H_t0: GPUBuffer <Float>,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ X_g0: GPUBuffer <Float>,
+    _ X_g: GPUBuffer <Float>,
+    _ X_m3: GPUBuffer <Float>,
+    _ X_m5: GPUBuffer <Float>,
+    _ X_m7: GPUBuffer <Float>,
+    _ X_m11: GPUBuffer <Float>,
+    _ X_m: GPUBuffer <Float>,
+    _ mu0: GPUBuffer <Float>,
+    _ mu: GPUBuffer <Float>,
+    _ gamma0: GPUBuffer <Float>,
+    _ gamma: GPUBuffer <Float>,
+    _ H_t1: GPUBuffer <Float>,
+    _ W_conv_r3: GPUBuffer <Float>,
+    _ W_conv_r5: GPUBuffer <Float>,
+    _ W_conv_r7: GPUBuffer <Float>,
+    _ W_conv_r11: GPUBuffer <Float>,
+    _ W_inhib_sub_r3: GPUBuffer <Float>,
+    _ W_inhib_div_r7: GPUBuffer <Float>,
+    _ beta: GPUBuffer <Float>,
+    _ softlog_alpha: Float,
+    _ inhib_alpha: Float,
+    _ n_: UInt32,
+    _ k_: UInt32,
+    _ r_: UInt32
+){
+    gemm(stream: stream, B, H_t0, X_g0, r_, n_, k_, 1);
+    gemm(stream: stream, A, X_g0, X_g, n_, r_, k_, 1);
+    conv_r3(stream: stream, H_t0, W_conv_r3, X_m3, n_, k_);
+    conv_r5(stream: stream, H_t0, W_conv_r5, X_m5, n_, k_);
+    conv_r7(stream: stream, H_t0, W_conv_r7, X_m7, n_, k_);
+    conv_r11(stream: stream, H_t0, W_conv_r11, X_m11, n_, k_);
+    add4(stream: stream, X_m3, X_m5, X_m7, X_m11, X_m, n_*k_, 1);
+    inhib_sub_r3(stream: stream, H_t0, W_inhib_sub_r3, mu0, mu, n_, k_);
+    inhib_div_r7(stream: stream, H_t0, W_inhib_div_r7, gamma0, gamma, n_, k_);
+    var n=n_
+    var k=k_
+    stream.dispatch(
+        kernel: "cortex_step",
+        args: [
+            .buffer(H_t1.buffer),
+            .buffer(X_g.buffer),
+            .buffer(X_m.buffer),
+            .buffer(mu.buffer),
+            .buffer(gamma.buffer),
+            .buffer(beta.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&k, MemoryLayout<UInt32>.size),
+            .bytes(&softlog_alpha, MemoryLayout<Float>.size),
+            .bytes(&inhib_alpha, MemoryLayout<Float>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(k)+255)/256,
+            height: Int(n),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+    stream.advance()
 }
