@@ -47,15 +47,22 @@ kernel void gemm(
     unsigned long offsetB = (unsigned long)layer * n * p;
     unsigned long offsetC = (unsigned long)layer * m * p;
     for (int curtile=0;curtile<(n+T-1)/T;curtile++){
-        if (row < m && (curtile*T + i.x*8)+7 < n)
-            *(threadgroup float8*)(&tA[i.y][i.x*8]) = *(device const float8*)(&A[offsetA + row * n + (curtile * T + i.x * 8)]);
-        else
-            *(threadgroup float8*)(&tA[i.y][i.x*8]) = float8(0.0f);
-
-        if ((curtile*T + i.y) < n && col+7 < p)
-            *(threadgroup float8*)(&tB[i.y][i.x*8]) = *(device const float8*)(&B[offsetB+(curtile*T + i.y)*p + col]);
-        else
-            *(threadgroup float8*)(&tB[i.y][i.x*8]) = float8(0.0f);
+        if (row < m && (curtile*T + i.x*8)+7 < n){
+            *(threadgroup float4*)(&tA[i.y][i.x*8]) = *(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8)]);
+            *(threadgroup float4*)(&tA[i.y][i.x*8+4]) = *(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8+4)]);
+        }
+        else{
+            *(threadgroup float4*)(&tA[i.y][i.x*8]) = float4(0.0f);
+            *(threadgroup float4*)(&tA[i.y][i.x*8+4]) = float4(0.0f);
+        }
+        if ((curtile*T + i.y) < n && col+7 < p){
+            *(threadgroup float4*)(&tB[i.y][i.x*8]) = *(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col]);
+            *(threadgroup float4*)(&tB[i.y][i.x*8+4]) = *(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col+4]);
+        }
+        else{
+            *(threadgroup float4*)(&tB[i.y][i.x*8]) = float4(0.0f);
+            *(threadgroup float4*)(&tB[i.y][i.x*8+4]) = float4(0.0f);
+        }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         #pragma unroll
         for (int k=0;k<T;k+=WIDTH*2){
