@@ -1,101 +1,192 @@
-# CORTEX-PRIME — Complete Mathematical Specification (Bio-Aligned, Locally Implementable)
-
-This document defines the **minimal, irreducible cortical computation** as a standalone mathematical object.
-
-Everything here corresponds to known cortical principles.
-
-Nothing here relies on gradients, losses, tokens, or optimization objectives.
-
-All operations are **local or low-rank**, with no global synchronization primitives.
+# CORTEX-PRIME (v7)
+## Complete Mathematical Specification of the Irreducible Cortical Atom
+*(Bio-Aligned · Locally Implementable · Synchronization-Free)*
 
 ---
 
-## 1. State (Only State That Exists)
+## 0. Purpose and Scope
+
+This document defines the **minimal mathematical object** required to reproduce the computational role of cortex.
+
+The system:
+- is recurrent
+- is spatially embedded
+- is competitive
+- is self-organizing
+- is chemically regulated
+
+It makes **no reference** to:
+- gradients
+- losses
+- objectives
+- backpropagation
+- token routing
+- symbolic control
+
+All computation is:
+- local, mesoscopic, or low-rank
+- linear or elementwise
+- bounded and stable
+- free of global synchronization
+
+This object is the **irreducible cortical atom**.
+
+---
+
+## 1. State (The Only State That Exists)
 
 \[
 H_t \in \mathbb{R}^{k \times n}
 \]
 
-- \(n\): number of cortical neurons  
-- \(k\): internal vector state per neuron  
+- \(n\): number of cortical neurons arranged on a 2-D sheet
+- \(k\): internal vector state per neuron
 
-Each neuron is **vector-valued**, not scalar.  
-There are no layers, no heads, no modules.
+Each neuron is **vector-valued**, not scalar.
+
+There are:
+- no layers
+- no heads
+- no modules
+- no explicit hierarchy
+
+Cortex is a **homogeneous recurrent sheet**.
 
 ---
 
-## 2. Input (Broadcast Injection)
+## 2. Input (Diffuse Broadcast Injection)
 
-Input enters cortex diffusely:
+External input enters cortex **without routing**:
 
 \[
 H_t \leftarrow H_t + E_t
 \]
 
 Where:
-- \(E_t \in \mathbb{R}^{k \times n}\) is a broadcast input field
-- Often low-rank or spatially smooth
-- No addressing, no selection, no routing
+- \(E_t \in \mathbb{R}^{k \times n}\)
+- typically smooth, low-rank, or spatially correlated
 
-Cortex does **not** decide where input goes.  
-Competition decides what survives.
+Properties:
+- no addressing
+- no selection
+- no gating
+
+Cortex does not choose where input goes.  
+Competition determines what persists.
 
 ---
 
-## 3. Fixed Cortical Dynamics
+## 3. Cortical Dynamics (Three-Scale Interaction)
 
-### 3.1 Recurrent Mixing (Low-Rank Coupling)
+State evolution arises from **three simultaneous interaction scales**:
+
+1. Global coordination (low-rank)
+2. Mesoscopic transport (topographic)
+3. Local competition (inhibitory)
+
+No single scale is sufficient alone.
+
+---
+
+## 3.1 Global Recurrent Mixing (Low-Rank Coordination)
 
 \[
-X = H_t \, A \, B
+X^{(g)} = H_t \, A \, B
 \]
 
+Where:
 - \(A \in \mathbb{R}^{n \times r}\)
 - \(B \in \mathbb{R}^{r \times n}\)
 - \(r \ll n\)
 
 Interpretation:
-- diffuse recurrent connectivity
+- diffuse recurrent influence
 - shared microcircuits
 - dendritic mixing
+- global contextual alignment
 
-Low-rank structure enforces:
-- parameter efficiency
-- linear-time computation
-- global coordination without global access
+Properties:
+- linear-time \(O(nr)\)
+- compressive
+- synchronizing
+- spatially non-specific
+
+This term provides **global context**, not detail.
 
 ---
 
-### 3.1b Sparse Long-Range Connectivity (Small-World Completion)
+## 3.2 Mesoscopic Transport (Topographic Convolutional Bridge)
 
-In addition to low-rank coordination, the cortical sheet includes a **sparse set of long-range excitatory connections**.
+To preserve spatial identity and enable high-fidelity mid-range communication, cortex includes a **fixed topographic transport operator**.
+
+### Definition
 
 Let:
 \[
-S^{LR} \in \mathbb{R}^{n \times n}
+\mathcal{S}_{\text{conv}} : \mathbb{R}^{k \times n} \rightarrow \mathbb{R}^{k \times n}
 \]
 
-with properties:
-- sparsity: \(\mathbb{P}(S^{LR}_{ij} \neq 0) = O(\log n / n)\)
-- nonnegative weights
-- no global density (bounded degree)
-- plastic on a **slow timescale** under the same Hebbian rule
+be a **depthwise separable convolution** applied independently to each feature channel.
 
-The effective recurrent drive becomes:
 \[
-X = H_t (A B + S^{LR})
+X^{(m)} = \mathcal{S}_{\text{conv}}(H_t)
 \]
 
-This ensures:
-- short average path length
-- rapid global information propagation
-- biologically realistic small-world topology
+Kernel properties:
+- compact spatial support
+- distance-dependent weights
+- translation-equivariant
+- fixed topology
+- no sparsity thresholds
+- no explicit graph structure
 
-No explicit structure is imposed beyond sparsity and plasticity.
+### Multi-Scale Extension
+
+To avoid a single privileged interaction distance, the operator may be expressed as a pyramid:
+
+\[
+X^{(m)} = \sum_{s} \mathcal{S}^{(s)}_{\text{conv}}(H_t)
+\]
+
+with kernels of increasing receptive field.
+
+Interpretation:
+- intracortical horizontal fibers
+- mesoscopic signal diffusion
+- preservation of high-dimensional structure
+
+Small-world behavior emerges implicitly through repeated local transport.
 
 ---
 
-### 3.2 Neuronal Saturation (Excitation Control)
+## 3.3 Chemical Gain Modulation of Global vs Mesoscopic Flow
+
+The relative influence of global and mesoscopic dynamics is controlled **only by neuromodulators**.
+
+Let:
+- \(\text{NE}_t \in \mathbb{R}^n\) (norepinephrine)
+- \(\text{ACh}_t \in \mathbb{R}^n\) (acetylcholine)
+
+Define gain fields:
+\[
+g^{(g)}_t = f_{\text{NE}}(\text{NE}_t), \quad
+g^{(m)}_t = f_{\text{ACh}}(\text{ACh}_t)
+\]
+
+Combined drive:
+\[
+X = g^{(g)}_t \odot X^{(g)} + g^{(m)}_t \odot X^{(m)}
+\]
+
+Interpretation:
+- NE amplifies global coordination
+- ACh emphasizes spatially precise processing
+
+No explicit error signals are used.
+
+---
+
+## 3.4 Neuronal Saturation (Excitation Control)
 
 \[
 H_{\text{raw}} = X \odot \phi(|X|)
@@ -103,193 +194,139 @@ H_{\text{raw}} = X \odot \phi(|X|)
 
 Where:
 - \(\phi(z)\) is saturating (e.g. \(\tanh(z)\), \(\log(1+z)\))
-- \(\odot\) is elementwise multiplication
 
 Purpose:
-- bound activity
 - prevent runaway excitation
 - preserve relative magnitudes
+- maintain dynamic range
 
 ---
 
-### 3.3 Lateral Inhibition (Local, Not Global)
+## 3.5 Local Lateral Inhibition (Competition Without Global Statistics)
 
-Cortex does **not** compute global means.  
-Each neuron is inhibited by a **local neighborhood**.
+Cortex performs **local**, not global, normalization.
 
-#### Spatial structure
-Neurons are indexed by position \(i\) on a cortical sheet.
+Let neurons be indexed by position \(i\).
 
-Let \(K_{ij}\) be a fixed local inhibitory kernel:
-- Gaussian
-- difference-of-Gaussians
-- compact support
+Let \(K_{ij}\) be a fixed local inhibitory kernel.
 
-#### Subtractive inhibition (local mean)
-
+### Subtractive inhibition
 \[
-\mu_i
-=
-\sum_{j \in \mathcal{N}(i)} K_{ij}\, H_{\text{raw},j}
+\mu_i =
+\sum_{j \in \mathcal{N}(i)} K_{ij} \, H_{\text{raw},j}
 \]
 
-#### Divisive inhibition (local gain control)
-
+### Divisive inhibition
 \[
-\gamma_i
-=
-\sum_{j \in \mathcal{N}(i)} K_{ij}\, |H_{\text{raw},j}|
+\gamma_i =
+\sum_{j \in \mathcal{N}(i)} K_{ij} \, |H_{\text{raw},j}|
 \]
 
-#### State update (per neuron)
+### Chemically Modulated Inhibition Gain
 
+Let:
+- \(\beta_i = \beta_0 \cdot h_{\text{ACh}}(\text{ACh}_{t,i})\)
+
+High ACh sharpens inhibition; low ACh relaxes it.
+
+### State Update
 \[
-H_{t+1,i}
-=
-\frac{H_{\text{raw},i} - \alpha \mu_i}{\epsilon + \beta \gamma_i}
+H_{t+1,i} =
+\frac{H_{\text{raw},i} - \alpha \mu_i}
+{\epsilon + \beta_i \gamma_i}
 \]
 
 Effects:
-- neurons compete locally
-- sparse representations emerge
-- scale is stabilized
-- global balance emerges **statistically**, not explicitly
-
-> Representation = neurons that survive **local** inhibition.
+- local competition
+- sparse activation
+- contrast enhancement
+- scale stabilization
 
 ---
 
-## 4. Prediction (Implicit, Not Supervised)
+## 4. Learning Rule (Single Hebbian Mechanism)
 
-Cortex predicts **its own next state**:
-
-\[
-H_t \rightarrow H_{t+1}
-\]
-
-No logits.  
-No probabilities.  
-No explicit outputs required.
-
-Optional diagnostic readout:
-
-\[
-\delta = H_{t+1}^{(\text{readout})} - \text{target}
-\]
-
-- \(\delta\) is a vector
-- local
-- never backpropagated
+Learning is **local, unsupervised, and chemically gated**.
 
 ---
 
-## 5. Learning Rule (Single Hebbian Plasticity)
-
-### 5.1 Hebbian Update (Oja-Style)
+## 4.1 Hebbian Plasticity (Oja-Stabilized)
 
 Let:
 \[
-X = H_t,\quad Y = H_{t+1}
+X = H_t, \quad Y = H_{t+1}
 \]
 
-Core Hebbian form:
+Hebbian core:
 \[
 \Delta W \propto X Y^\top
 \]
 
-Stabilized (Oja):
+Oja stabilization:
 \[
 \Delta W \propto X Y^\top - Y Y^\top W
 \]
 
-Properties:
-- strengthens correlated activity
-- suppresses redundancy
-- prevents divergence
-
 ---
 
-### 5.2 Low-Rank Plasticity (Biological Constraint)
+## 4.2 Low-Rank Plasticity Constraint
 
 Connectivity factorization:
 \[
 W = A B
 \]
 
-Plasticity acts only through low-rank factors:
+Plasticity acts **only** on \(A\):
 
 \[
-\Delta A
-=
+\Delta A =
 \eta_t \odot
 \left(
 Y^\top (X B^\top - Y A)
 \right)
 \]
 
-- local
-- symmetric
-- linear-time
-- biologically plausible
+The mesoscopic convolutional operator is **not plastic** at this timescale.
 
 ---
 
-### 5.3 Sparse Long-Range Plasticity (Slow Timescale)
+## 5. Neuromodulation (Chemical Control of Plasticity)
 
-For \(S^{LR}\), apply the **same Hebbian rule** but with:
-- much smaller \(\eta^{LR}\)
-- optional activity thresholding
-- infrequent updates
+Learning rate is regulated by **chemical fields**, not objectives.
 
-This mirrors white-matter tract refinement and developmental pruning.
-
----
-
-## 6. Neuromodulation (Explicit Chemical Field Definition)
-
-Learning rate is **not an objective**.  
-It is gated by **chemical fields**.
-
-### 6.1 Chemical Signals
-
-Neuromodulators are spatial fields:
+### 5.1 Neuromodulator Fields
 
 \[
-\text{DA}_t,\ \text{ACh}_t,\ \text{NE}_t,\ \text{5HT}_t \in \mathbb{R}^{n}
+\text{DA}_t,\ \text{ACh}_t,\ \text{NE}_t,\ \text{5HT}_t \in \mathbb{R}^n
 \]
 
-Interpretation:
-- **DA** → reinforcement / association
-- **ACh** → plasticity & attention
-- **NE** → arousal / gain
-- **5-HT** → stability / consolidation
+Roles:
+- DA: reinforcement and association
+- ACh: precision and plasticity
+- NE: global gain and synchronization
+- 5-HT: stability and consolidation
 
 ---
 
-### 6.2 Rank Profiles (Fixed Wiring)
+### 5.2 Rank Profiles (Fixed Parameters)
 
-Each chemical modulates plasticity along low-rank axes:
+Each neuromodulator projects onto low-rank axes:
 
 \[
-d_{\text{DA}}, d_{\text{ACh}}, d_{\text{NE}}, d_{\text{5HT}} \in \mathbb{R}^{r}
+d_{\text{DA}}, d_{\text{ACh}}, d_{\text{NE}}, d_{\text{5HT}} \in \mathbb{R}^r
 \]
 
 Baseline:
 \[
-b \in \mathbb{R}^{r}
+b \in \mathbb{R}^r
 \]
-
-These are **fixed organism parameters**.
 
 ---
 
-### 6.3 Explicit Definition of \(f\)
-
-Pre-gated plasticity field:
+### 5.3 Neuromodulated Learning Rate Field
 
 \[
-Z_t
-=
+Z_t =
 \text{DA}_t d_{\text{DA}}^\top
 +
 \text{ACh}_t d_{\text{ACh}}^\top
@@ -299,82 +336,73 @@ Z_t
 \text{5HT}_t d_{\text{5HT}}^\top
 +
 \mathbf{1}_n b^\top
-\quad \in \mathbb{R}^{n \times r}
 \]
-
-Neuromodulated learning-rate field:
 
 \[
-\boxed{
-\eta_t
-=
-\eta_{\max}\, \sigma(Z_t)
-}
+\eta_t =
+\eta_{\max} \, \sigma(Z_t)
 \]
 
-Where:
-- \(\sigma\) is elementwise sigmoid
-- \(\eta_{\max} > 0\) bounds plasticity
-
-Plasticity is **chemically gated, spatially structured, and low-rank**.
+Plasticity is:
+- spatially structured
+- chemically gated
+- bounded
+- low-rank
 
 ---
 
-## 7. Stabilization (Biological Necessity)
+## 6. Stabilization (Biological Necessity)
 
 ### Weight normalization
-
 \[
 A \leftarrow \frac{A}{\|A\|}
 \]
 
 ### Synaptic decay
-
 \[
 A \leftarrow (1 - \lambda) A
 \]
 
 Represents:
-- synaptic turnover
+- turnover
 - homeostasis
 - forgetting
 
 ---
 
-## 8. Computational Properties
+## 7. Computational Properties
 
-- Time complexity: **O(n)** (bounded-degree graph + low-rank terms)  
-- No gradients  
-- No loss minimization  
-- No global objective  
-- No global synchronization  
-- Stable under infinite input  
-
----
-
-## 9. What This Is
-
-- A **cortical prime**
-- A homogeneous recurrent sheet
-- Predictive
-- Competitive
-- Self-organizing
-- Small-world-capable without hardcoding structure
+- Time complexity: \(O(n)\)
+- No gradients
+- No loss minimization
+- No global objectives
+- No synchronization barriers
+- Stable under continuous input
 
 ---
 
-## 10. What This Is Not
+## 8. What This Is
+
+- A cortical prime
+- A spatially embedded recurrent sheet
+- Competitive and self-organizing
+- Chemically regulated
+- Capable of mesoscopic structure formation
+
+---
+
+## 9. What This Is Not
 
 - Not cognition
-- Not grammar
 - Not planning
+- Not language
 - Not consciousness
 
-Those require **closed loops** with:
-- thalamus (gating)
+Those require closed loops with:
+- thalamus (input gating)
 - basal ganglia (selection)
 - hippocampus (memory)
-- body/environment (grounding)
+- body and environment
 
 ---
 

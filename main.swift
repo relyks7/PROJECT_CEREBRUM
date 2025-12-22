@@ -214,6 +214,37 @@ public func copy(
         )
     )
 }
+public func transpose(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ m_: UInt32
+){
+    precondition(A.count == Int(n_*m_), "A has wrong size")
+    precondition(B.count == Int(n_*m_), "B has wrong size")
+    var n=n_
+    var m=m_
+    stream.dispatch(
+        kernel: "transpose",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&m, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 31) / 32,
+            height: (Int(m) + 31) / 32,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 64,
+            height: 64,
+            depth: 1
+        )
+    )
+}
 public func div(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
