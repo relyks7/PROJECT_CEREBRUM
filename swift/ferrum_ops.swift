@@ -1,205 +1,6 @@
 import Metal
 import Foundation
 import Darwin
-//<start AI_WRITTEN>
-// ============================================================
-// 1. IMMUTABLE METAL CONTEXT (MULTI-METALLIB, THREAD-SAFE)
-// ============================================================
-@inline(__always)
-func bytes<T>(_ value: inout T) -> KernelArg {
-    return withUnsafeBytes(of: &value) {
-        KernelArg.bytes($0.baseAddress!, $0.count)
-    }
-}
-public final class MetalContext {
-
-    public let device: MTLDevice
-    public let libraries: [MTLLibrary]
-    public let pipelines: [String: MTLComputePipelineState]
-
-    /// Automatically loads all `.metallib` files from a directory
-    public init(kernelsDirectory: URL) {
-        self.device = MTLCreateSystemDefaultDevice()!
-
-        let fm = FileManager.default
-
-        // 1. Discover metallibs
-        let urls = (try? fm.contentsOfDirectory(
-            at: kernelsDirectory,
-            includingPropertiesForKeys: nil
-        ))?.filter { $0.pathExtension == "metallib" } ?? []
-
-        precondition(!urls.isEmpty, "No .metallib files found in \(kernelsDirectory.path)")
-
-        // 2. Load libraries
-        var libs: [MTLLibrary] = []
-        for url in urls {
-            let lib = try! device.makeLibrary(URL: url)
-            libs.append(lib)
-        }
-        self.libraries = libs
-
-        // 3. Discover kernels + build pipelines
-        var pipeTable: [String: MTLComputePipelineState] = [:]
-
-        for lib in libs {
-            for name in lib.functionNames {
-                // Skip duplicates (first wins)
-                if pipeTable[name] != nil { continue }
-
-                guard let fn = lib.makeFunction(name: name) else { continue }
-
-                let pipe = try! device.makeComputePipelineState(function: fn)
-                pipeTable[name] = pipe
-            }
-        }
-
-        precondition(!pipeTable.isEmpty, "No compute kernels found in metallibs")
-
-        self.pipelines = pipeTable
-    }
-}
-
-// ============================================================
-// 2. PERSISTENT GPU BUFFER (LOGICAL SIZE, FIXED CAPACITY)
-// ============================================================
-
-public final class GPUBuffer<T> {
-
-    public let buffer: MTLBuffer
-    public let capacity: Int
-    public var count: Int
-
-    public init(device: MTLDevice, capacity: Int) {
-        self.capacity = capacity
-        self.count = capacity
-        self.buffer = device.makeBuffer(
-            length: capacity * MemoryLayout<T>.stride,
-            options: .storageModeShared
-        )!
-    }
-
-    @inline(__always)
-    public func ptr() -> UnsafeMutablePointer<T> {
-        buffer.contents().assumingMemoryBound(to: T.self)
-    }
-}
-
-// ============================================================
-// 3. ZERO-ALLOCATION KERNEL ARGUMENTS
-// ============================================================
-
-public enum KernelArg {
-    case buffer(MTLBuffer)
-    case bytes(UnsafeRawPointer, Int)
-}
-
-// ============================================================
-// 4. COMPUTE STREAM (ONE PER COGNITIVE PROCESS)
-// ============================================================
-
-public final class ComputeStream {
-
-    private let ctx: MetalContext
-    private let queue: MTLCommandQueue
-
-    private let inflight: Int
-
-    private var cmdRing: [MTLCommandBuffer] = []
-    private var encRing: [MTLComputeCommandEncoder] = []
-    private var committed: [Bool] = []
-
-    private var index: Int = 0
-
-    // --------------------------------------------------------
-
-    public init(context: MetalContext, inflightBuffers: Int = 3) {
-        self.ctx = context
-        self.queue = context.device.makeCommandQueue()!
-        self.inflight = inflightBuffers
-
-        for _ in 0..<inflight {
-            let cmd = queue.makeCommandBuffer()!
-            let enc = cmd.makeComputeCommandEncoder()!
-            cmdRing.append(cmd)
-            encRing.append(enc)
-            committed.append(false)
-        }
-    }
-
-    // --------------------------------------------------------
-    // HOT PATH — NO ALLOCATION, NO SYNC
-    // --------------------------------------------------------
-
-    @inline(__always)
-    public func dispatch(
-        kernel: String,
-        args: [KernelArg],
-        grid: MTLSize,
-        threads: MTLSize
-    ) {
-        let enc = encRing[index]
-        let pipe = ctx.pipelines[kernel]!
-
-        enc.setComputePipelineState(pipe)
-
-        for (i, arg) in args.enumerated() {
-            switch arg {
-            case .buffer(let b):
-                enc.setBuffer(b, offset: 0, index: i)
-            case .bytes(let ptr, let size):
-                enc.setBytes(ptr, length: size, index: i)
-            }
-        }
-
-        enc.dispatchThreadgroups(grid, threadsPerThreadgroup: threads)
-    }
-
-    // --------------------------------------------------------
-    // SUBMIT CURRENT STEP (SAFE RING ADVANCE)
-    // --------------------------------------------------------
-
-    @inline(__always)
-    public func advance() {
-        // Commit current slot
-        let cmd = cmdRing[index]
-        let enc = encRing[index]
-
-        enc.endEncoding()
-        cmd.commit()
-        committed[index] = true
-
-        // Advance ring
-        index = (index + 1) % inflight
-
-        // Ensure slot is free before reuse
-        if committed[index] {
-            cmdRing[index].waitUntilCompleted()
-            committed[index] = false
-        }
-
-        // Create new command buffer & encoder
-        let nextCmd = queue.makeCommandBuffer()!
-        let nextEnc = nextCmd.makeComputeCommandEncoder()!
-
-        cmdRing[index] = nextCmd
-        encRing[index] = nextEnc
-    }
-
-    // --------------------------------------------------------
-    // EXPLICIT SYNCHRONIZATION (BOUNDARY ONLY)
-    // --------------------------------------------------------
-
-    public func synchronize() {
-        for i in 0..<inflight {
-            if committed[i] {
-                cmdRing[i].waitUntilCompleted()
-                committed[i] = false
-            }
-        }
-    }
-}
-//<end AI_WRITTEN>
 public func add(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -242,7 +43,8 @@ public func add4(
     _ D: GPUBuffer <Float>,
     _ E: GPUBuffer <Float>,
     _ n_: UInt32,
-    _ b_: UInt32
+    _ b_: UInt32,
+    _ alpha_: Float
 ){
     precondition(A.count == Int(n_*b_), "A has wrong size")
     precondition(B.count == Int(n_*b_), "B has wrong size")
@@ -251,6 +53,7 @@ public func add4(
     precondition(E.count == Int(n_*b_), "E has wrong size")
     var n=n_
     var b=b_
+    var alpha=alpha_
     stream.dispatch(
         kernel: "add4",
         args: [
@@ -260,7 +63,8 @@ public func add4(
             .buffer(D.buffer),
             .buffer(E.buffer),
             bytes(&n),
-            bytes(&b)
+            bytes(&b),
+            bytes(&alpha)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1216,11 +1020,16 @@ public func cortex_step(
     stream: ComputeStream,
     _ E_t: GPUBuffer <Float>,
     _ H_t0: GPUBuffer <Float>,
+    _ H_t0_t: GPUBuffer <Float>,
     _ A: GPUBuffer <Float>,
     _ B: GPUBuffer <Float>,
     _ B_t: GPUBuffer <Float>,
     _ X_g0: GPUBuffer <Float>,
     _ X_g: GPUBuffer <Float>,
+    _ X_m3_t: GPUBuffer <Float>,
+    _ X_m5_t: GPUBuffer <Float>,
+    _ X_m7_t: GPUBuffer <Float>,
+    _ X_m11_t: GPUBuffer <Float>,
     _ X_m3: GPUBuffer <Float>,
     _ X_m5: GPUBuffer <Float>,
     _ X_m7: GPUBuffer <Float>,
@@ -1243,6 +1052,7 @@ public func cortex_step(
     _ W_inhib_div_r7: GPUBuffer <Float>,
     _ beta: GPUBuffer <Float>,
     _ softlog_alpha_: Float,
+    _ mes_alpha: Float,
     _ inhib_alpha_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
@@ -1250,13 +1060,18 @@ public func cortex_step(
 ){
     gemm(stream: stream, B_t, H_t0, X_g0, r_, n_, k_, 1);
     gemm(stream: stream, A, X_g0, X_g, n_, r_, k_, 1);
-    conv_r3(stream: stream, H_t0, W_conv_r3, X_m3, n_, k_);
-    conv_r5(stream: stream, H_t0, W_conv_r5, X_m5, n_, k_);
-    conv_r7(stream: stream, H_t0, W_conv_r7, X_m7, n_, k_);
-    conv_r11(stream: stream, H_t0, W_conv_r11, X_m11, n_, k_);
-    add4(stream: stream, X_m3, X_m5, X_m7, X_m11, X_m, n_*k_, 1);
-    inhib_sub_r3(stream: stream, H_t0, W_inhib_sub_r3, mu0, mu, mu1, mu2, n_, k_);
-    inhib_div_r7(stream: stream, H_t0, W_inhib_div_r7, gamma0, gamma, gamma1, gamma2, n_, k_);
+    transpose(stream: stream, H_t0, H_t0_t, k_, n_)
+    conv_r3(stream: stream, H_t0_t, W_conv_r3, X_m3_t, n_, k_);
+    conv_r5(stream: stream, H_t0_t, W_conv_r5, X_m5_t, n_, k_);
+    conv_r7(stream: stream, H_t0_t, W_conv_r7, X_m7_t, n_, k_);
+    conv_r11(stream: stream, H_t0_t, W_conv_r11, X_m11_t, n_, k_);
+    transpose(stream: stream, X_m3_t, X_m3, n_, k_)
+    transpose(stream: stream, X_m5_t, X_m5, n_, k_)
+    transpose(stream: stream, X_m7_t, X_m7, n_, k_)
+    transpose(stream: stream, X_m11_t, X_m11, n_, k_)
+    add4(stream: stream, X_m3, X_m5, X_m7, X_m11, X_m, n_*k_, 1, mes_alpha);
+    inhib_sub_r3(stream: stream, H_t0, W_inhib_sub_r3, mu0, mu, mu1, mu2, k_, n_);
+    inhib_div_r7(stream: stream, H_t0, W_inhib_div_r7, gamma0, gamma, gamma1, gamma2, k_, n_);
     var n=n_
     var k=k_
     var softlog_alpha=softlog_alpha_
@@ -1382,323 +1197,3 @@ public func get_eta(
         )
     )
 }
-//NB: ASSUME B_t IS ALREADY SET (given that B is constant)
-public func oja(
-    stream: ComputeStream,
-    _ A: GPUBuffer<Float>,
-    _ A_new: GPUBuffer<Float>,
-    _ B: GPUBuffer<Float>,
-    _ eta: GPUBuffer<Float>,
-    _ B_t: GPUBuffer<Float>,
-    _ T1: GPUBuffer<Float>,
-    _ T2: GPUBuffer<Float>,
-    _ S: GPUBuffer<Float>,
-    _ U: GPUBuffer<Float>,
-    _ G: GPUBuffer<Float>,
-    _ H: GPUBuffer<Float>,
-    _ X: GPUBuffer<Float>,
-    _ Y: GPUBuffer<Float>,
-    _ Y_t: GPUBuffer<Float>,
-    _ r_: UInt32,
-    _ n_: UInt32,
-    _ k_: UInt32,
-    _ lambda_: Float
-){
-    transpose(stream: stream, Y, Y_t, n_, k_)
-    gemm(stream: stream, Y_t, B, T1, k_, n_, r_, 1)
-    gemm(stream: stream, Y_t, A, T2, k_, n_, r_, 1)
-    gemm(stream: stream, B_t, B, S, r_, n_, r_, 1)
-    gemm(stream: stream, T2, S, U, k_, r_, r_, 1)
-    gemm(stream: stream, X, T1, G, n_, k_, r_, 1)
-    gemm(stream: stream, Y, U, H, n_, k_, r_, 1)
-    final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_)
-    copy(stream: stream, A_new, A, n_*r_, 1)
-}
-final class CortexPrime{
-    //gpu
-    let device: MTLDevice
-    let stream: ComputeStream
-    //main
-    var H_t0: GPUBuffer <Float>
-    var H_t1: GPUBuffer <Float>
-
-    var A: GPUBuffer <Float>
-    var A_new: GPUBuffer<Float>
-
-    var B: GPUBuffer <Float>
-    var B_t: GPUBuffer<Float>
-
-    var X_g: GPUBuffer <Float>
-    var X_m: GPUBuffer <Float>
-    var mu: GPUBuffer <Float>
-    var gamma: GPUBuffer <Float>
-
-    var eta: GPUBuffer<Float>
-    var H_t1_t: GPUBuffer<Float>
-    //scratch
-    var X_g0: GPUBuffer <Float>
-    var X_m3: GPUBuffer <Float>
-    var X_m5: GPUBuffer <Float>
-    var X_m7: GPUBuffer <Float>
-    var X_m11: GPUBuffer <Float>
-
-    var mu0: GPUBuffer <Float>
-    var mu1: GPUBuffer <Float>
-    var mu2: GPUBuffer <Float>
-
-    var gamma0: GPUBuffer <Float>
-    var gamma1: GPUBuffer <Float>
-    var gamma2: GPUBuffer <Float>
-
-    var T1: GPUBuffer<Float>
-    var T2: GPUBuffer<Float>
-    var S: GPUBuffer<Float>
-    var U: GPUBuffer<Float>
-    var G: GPUBuffer<Float>
-    var H: GPUBuffer<Float>
-    //params
-    let n: UInt32
-    let k: UInt32
-    let r: UInt32
-
-    let w_NE: Float
-    let w_ACh: Float
-    let w_DA: Float
-
-    var W_conv_r3: GPUBuffer <Float>
-    var W_conv_r5: GPUBuffer <Float>
-    var W_conv_r7: GPUBuffer <Float>
-    var W_conv_r11: GPUBuffer <Float>
-
-    var W_inhib_sub_r3: GPUBuffer <Float>
-    var W_inhib_div_r7: GPUBuffer <Float>
-
-    var beta: GPUBuffer <Float>
-
-    var oja_bias: Float
-
-    var softlog_alpha: Float
-    var inhib_alpha: Float
-
-    var lambda: Float
-    var eta_max: Float
-    
-    init(device: MTLDevice, 
-        stream: ComputeStream, 
-        n: UInt32, 
-        k: UInt32, 
-        r: UInt32,
-        B: GPUBuffer<Float>,
-        W_conv_r3: GPUBuffer<Float>,
-        W_conv_r5: GPUBuffer<Float>,
-        W_conv_r7: GPUBuffer<Float>,
-        W_conv_r11: GPUBuffer<Float>,
-        W_inhib_sub_r3: GPUBuffer<Float>,
-        W_inhib_div_r7: GPUBuffer<Float>,
-        beta: GPUBuffer<Float>,
-        softlog_alpha: Float,
-        inhib_alpha: Float,
-        lambda: Float,
-        eta_max: Float,
-        oja_bias: Float,
-        w_NE: Float, 
-        w_ACh: Float, 
-        w_DA: Float){
-        self.n=n
-        self.k=k
-        self.r=r
-        self.device=device
-        self.stream=stream
-        self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.H_t1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.A=GPUBuffer(device: device, capacity: Int(n*r))
-        self.A_new=GPUBuffer(device: device, capacity: Int(n*r))
-        self.B=GPUBuffer(device: device, capacity: Int(n*r))
-        self.B_t=GPUBuffer(device: device, capacity: Int(r*n))
-        copy(stream: stream, B, self.B, n*r, 1)
-        transpose(stream: stream, B, self.B_t, n, r)
-        self.X_g=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu=GPUBuffer(device: device, capacity: Int(n))
-        self.gamma=GPUBuffer(device: device, capacity: Int(n))
-        self.eta=GPUBuffer(device: device, capacity: Int(n))
-        self.H_t1_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_g0=GPUBuffer(device: device, capacity: Int(r*k))
-        self.X_m3=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m5=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m7=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m11=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu2=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma2=GPUBuffer(device: device, capacity: Int(n*k))
-        self.T1=GPUBuffer(device: device, capacity: Int(k*r))
-        self.T2=GPUBuffer(device: device, capacity: Int(k*r))
-        self.S=GPUBuffer(device: device, capacity: Int(r*r))
-        self.U=GPUBuffer(device: device, capacity: Int(k*r))
-        self.G=GPUBuffer(device: device, capacity: Int(n*r))
-        self.H=GPUBuffer(device: device, capacity: Int(n*r))
-        self.W_conv_r3=W_conv_r3
-        self.W_conv_r5=W_conv_r5
-        self.W_conv_r7=W_conv_r7
-        self.W_conv_r11=W_conv_r11
-        self.W_inhib_sub_r3=W_inhib_sub_r3
-        self.W_inhib_div_r7=W_inhib_div_r7
-        self.beta=beta
-        self.softlog_alpha=softlog_alpha
-        self.inhib_alpha=inhib_alpha
-        self.lambda=lambda
-        self.eta_max=eta_max
-        self.oja_bias=oja_bias
-        self.w_NE=w_NE
-        self.w_ACh=w_ACh
-        self.w_DA=w_DA
-    }
-    func step(E_t: GPUBuffer<Float>){
-        cortex_step(
-            stream: stream,
-            E_t,
-            H_t0,
-            A,
-            B, 
-            B_t,
-            X_g0,
-            X_g,
-            X_m3,
-            X_m5,
-            X_m7,
-            X_m11,
-            X_m,
-            mu0,
-            mu1,
-            mu2,
-            mu,
-            gamma0,
-            gamma1,
-            gamma2,
-            gamma,
-            H_t1,
-            W_conv_r3,
-            W_conv_r5,
-            W_conv_r7,
-            W_conv_r11,
-            W_inhib_sub_r3,
-            W_inhib_div_r7,
-            beta,
-            softlog_alpha,
-            inhib_alpha,
-            n,
-            k,
-            r
-        )
-    }
-    func learn(
-        NE: GPUBuffer <Float>,
-        ACh: GPUBuffer <Float>,
-        DA: GPUBuffer <Float>
-    ){
-        get_eta(
-            stream: stream,
-            NE,
-            ACh,
-            DA,
-            eta,
-            n,
-            w_NE,
-            w_ACh,
-            w_DA,
-            oja_bias,
-            eta_max
-        )
-        oja(
-            stream: stream,
-            A,
-            A_new,
-            B,
-            eta,
-            B_t,
-            T1,
-            T2,
-            S,
-            U,
-            G,
-            H,
-            H_t0,
-            H_t1,
-            H_t1_t,
-            r,
-            n,
-            k,
-            lambda
-        )
-        stream.advance()
-    }
-    func zero_state(){
-        zero(stream: stream, self.H_t0, n*k, 1)
-        zero(stream: stream, self.H_t1, n*k, 1)
-        zero(stream: stream, mu, n, 1)
-        zero(stream: stream, gamma, n, 1)
-        stream.advance()
-    }
-}
-let ctx = MetalContext(
-    kernelsDirectory: URL(fileURLWithPath: "kernels")
-)
-
-let stream = ComputeStream(context: ctx)
-let device = ctx.device
-
-let n: UInt32 = 128
-let k: UInt32 = 16
-let r: UInt32 = 32
-
-let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
-
-let W_conv_r3  = GPUBuffer<Float>(device: device, capacity: 7)
-let W_conv_r5  = GPUBuffer<Float>(device: device, capacity: 11)
-let W_conv_r7  = GPUBuffer<Float>(device: device, capacity: 15)
-let W_conv_r11 = GPUBuffer<Float>(device: device, capacity: 23)
-
-let W_inhib_sub_r3 = GPUBuffer<Float>(device: device, capacity: 7)
-let W_inhib_div_r7 = GPUBuffer<Float>(device: device, capacity: 15)
-
-let beta = GPUBuffer<Float>(device: device, capacity: Int(n))
-
-zero(stream: stream, B, n*r, 1)
-zero(stream: stream, beta, n, 1)
-
-zero(stream: stream, W_conv_r3, 7, 1)
-zero(stream: stream, W_conv_r5, 11, 1)
-zero(stream: stream, W_conv_r7, 15, 1)
-zero(stream: stream, W_conv_r11, 23, 1)
-
-zero(stream: stream, W_inhib_sub_r3, 7, 1)
-zero(stream: stream, W_inhib_div_r7, 15, 1)
-
-stream.synchronize()
-
-let cortex = CortexPrime(
-    device: device,
-    stream: stream,
-    n: n,
-    k: k,
-    r: r,
-    B: B,
-    W_conv_r3: W_conv_r3,
-    W_conv_r5: W_conv_r5,
-    W_conv_r7: W_conv_r7,
-    W_conv_r11: W_conv_r11,
-    W_inhib_sub_r3: W_inhib_sub_r3,
-    W_inhib_div_r7: W_inhib_div_r7,
-    beta: beta,
-    softlog_alpha: 1.0,
-    inhib_alpha: 1.0,
-    lambda: 1e-4,
-    eta_max: 1e-2,
-    oja_bias: 0.0,
-    w_NE: 1.0,
-    w_ACh: 1.0,
-    w_DA: 1.0
-)
