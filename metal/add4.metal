@@ -1,6 +1,6 @@
 #include <metal_stdlib>
 using namespace metal;
-kernel void add(
+kernel void add4(
     device const float* A[[buffer(0)]],
     device const float* B[[buffer(1)]],
     device const float* C[[buffer(2)]],
