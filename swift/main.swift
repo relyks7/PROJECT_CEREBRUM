@@ -104,6 +104,7 @@ public func cortex_setup() -> (CortexPrime, GPUBuffer<Float>, ComputeStream, UIn
     for i in 0..<(n*r) {
         cortex.A.ptr()[Int(i)] = Float.random(in: -0.02...0.02)
     }
+    cortex.zero_state()
     return (cortex, test_E, cortex_stream, n, k)
 }
 let (cortex, test_E, stream, n, k) = cortex_setup()

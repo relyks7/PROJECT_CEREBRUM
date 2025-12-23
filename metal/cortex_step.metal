@@ -18,6 +18,6 @@ kernel void cortex_step(
         uint idx=i.y*k+i.x;
         float X=X_g[idx]+X_m[idx]+E_t[idx];
         float aX=fabs(X);
-        H_t1[idx]=((X)*(log(1.0f+softlog_alpha*aX)/(1e-20+aX))-(inhib_alpha*mu[i.y]))/(1e-20+beta[i.y]*gamma[i.y]);
+        H_t1[idx]=((X)*(log(1.0f+softlog_alpha*aX)/(1e-20+aX))-(inhib_alpha*mu[i.y]))/(1e-6+beta[i.y]*gamma[i.y]);
     }
 }
