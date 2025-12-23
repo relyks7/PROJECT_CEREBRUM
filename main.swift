@@ -839,6 +839,7 @@ public func mean_simd(
     var cur = A
     var curN = Int(n_)
     var toggle=false
+    var isfirst=true
     while curN > 1 {
         let nextN = (curN + 127) / 128
         let out: GPUBuffer<Float>
@@ -850,25 +851,49 @@ public func mean_simd(
         }
         var n = UInt32(curN)
         var b = b_
-        stream.dispatch(
-            kernel: "mean_simd_reduce",
-            args: [
-                .buffer(cur.buffer),
-                .buffer(out.buffer),
-                .bytes(&n, MemoryLayout<UInt32>.size),
-                .bytes(&b, MemoryLayout<UInt32>.size)
-            ],
-            grid: MTLSize(
-                width: nextN,
-                height: batch,
-                depth: 1
-            ),
-            threads: MTLSize(
-                width: 128,
-                height: 1,
-                depth: 1
+        if isfirst{
+            stream.dispatch(
+                kernel: "mean_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .bytes(&n, MemoryLayout<UInt32>.size),
+                    .bytes(&b, MemoryLayout<UInt32>.size)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
             )
-        )
+            isfirst=false
+        }
+        else{
+            stream.dispatch(
+                kernel: "sum_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .bytes(&n, MemoryLayout<UInt32>.size),
+                    .bytes(&b, MemoryLayout<UInt32>.size)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+        }
         if nextN == 1 { return }
         cur = out
         curN = nextN
@@ -889,6 +914,7 @@ public func abs_mean_simd(
     var cur = A
     var curN = Int(n_)
     var toggle=false
+    var isfirst=true
     while curN > 1 {
         let nextN = (curN + 127) / 128
         let out: GPUBuffer<Float>
@@ -900,25 +926,49 @@ public func abs_mean_simd(
         }
         var n = UInt32(curN)
         var b = b_
-        stream.dispatch(
-            kernel: "abs_mean_simd_reduce",
-            args: [
-                .buffer(cur.buffer),
-                .buffer(out.buffer),
-                .bytes(&n, MemoryLayout<UInt32>.size),
-                .bytes(&b, MemoryLayout<UInt32>.size)
-            ],
-            grid: MTLSize(
-                width: nextN,
-                height: batch,
-                depth: 1
-            ),
-            threads: MTLSize(
-                width: 128,
-                height: 1,
-                depth: 1
+        if isfirst{
+            stream.dispatch(
+                kernel: "abs_mean_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .bytes(&n, MemoryLayout<UInt32>.size),
+                    .bytes(&b, MemoryLayout<UInt32>.size)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
             )
-        )
+            isfirst=false
+        }
+        else{
+            stream.dispatch(
+                kernel: "sum_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .bytes(&n, MemoryLayout<UInt32>.size),
+                    .bytes(&b, MemoryLayout<UInt32>.size)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+        }
         if nextN == 1 { return }
         cur = out
         curN = nextN
@@ -1074,7 +1124,7 @@ public func inhib_sub_r3(
     precondition(A.count == Int(n_*b_), "A has wrong size")
     precondition(W.count == 7, "W has wrong size")
     precondition(B.count == Int(n_*b_), "B has wrong size")
-    precondition(C.count == Int(n_), "C has wrong size")
+    precondition(C.count == Int(b_), "C has wrong size")
     var n=n_
     var b=b_
     stream.dispatch(
@@ -1113,7 +1163,7 @@ public func inhib_div_r7(
     precondition(A.count == Int(n_*b_), "A has wrong size")
     precondition(W.count == 15, "W has wrong size")
     precondition(B.count == Int(n_*b_), "B has wrong size")
-    precondition(C.count == Int(n_), "C has wrong size")
+    precondition(C.count == Int(b_), "C has wrong size")
     var n=n_
     var b=b_
     stream.dispatch(
@@ -1168,8 +1218,8 @@ public func cortex_step(
     _ W_inhib_sub_r3: GPUBuffer <Float>,
     _ W_inhib_div_r7: GPUBuffer <Float>,
     _ beta: GPUBuffer <Float>,
-    _ softlog_alpha: Float,
-    _ inhib_alpha: Float,
+    _ softlog_alpha_: Float,
+    _ inhib_alpha_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
     _ r_: UInt32
@@ -1185,6 +1235,8 @@ public func cortex_step(
     inhib_div_r7(stream: stream, H_t0, W_inhib_div_r7, gamma0, gamma, gamma1, gamma2, n_, k_);
     var n=n_
     var k=k_
+    var softlog_alpha=softlog_alpha_
+    var inhib_alpha=inhib_alpha_
     stream.dispatch(
         kernel: "cortex_step",
         args: [
@@ -1557,11 +1609,13 @@ final class CortexPrime{
             k,
             lambda
         )
+        stream.advance()
     }
     func zero_state(){
         zero(stream: stream, self.H_t0, n*k, 1)
         zero(stream: stream, self.H_t1, n*k, 1)
         zero(stream: stream, mu, n, 1)
         zero(stream: stream, gamma, n, 1)
+        stream.advance()
     }
 }
