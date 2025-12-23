@@ -15,8 +15,8 @@ kernel void gemm(
     uint si [[simdgroup_index_in_threadgroup]]
 )
 {
-    threadgroup float tA[T][T+1];
-    threadgroup float tB[T][T+1];
+    threadgroup float tA[T][T];
+    threadgroup float tB[T][T];
     simdgroup_float8x8 acc1; 
     simdgroup_float8x8 acc2; 
     simdgroup_float8x8 acc3; 

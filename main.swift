@@ -219,8 +219,8 @@ public func add(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(bytes(&n)), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -259,8 +259,8 @@ public func add4(
             .buffer(C.buffer),
             .buffer(D.buffer),
             .buffer(E.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -290,8 +290,8 @@ public func copy(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -318,8 +318,8 @@ public func zero(
         kernel: "zero",
         args: [
             .buffer(A.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -349,8 +349,8 @@ public func transpose(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&m), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&m)
         ],
         grid: MTLSize(
             width: (Int(n) + 31) / 32,
@@ -383,8 +383,8 @@ public func div(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -417,8 +417,8 @@ public func mul(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -451,8 +451,8 @@ public func sub(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -487,9 +487,9 @@ public func embedding(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&d), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&vocab_size), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&d),
+            bytes(&vocab_size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -526,10 +526,10 @@ public func gemm(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(bytes(&m), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&p), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&m),
+            bytes(&n),
+            bytes(&p),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: ((Int(p)+63)/64),
@@ -567,9 +567,9 @@ public func layernorm(
             .buffer(B.buffer),
             .buffer(mu.buffer),
             .buffer(sigma2.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&eps), MemoryLayout<Float>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&eps),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -599,8 +599,8 @@ public func tanh(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -632,9 +632,9 @@ public func softlog(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&alpha), MemoryLayout<Float>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&alpha),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -664,8 +664,8 @@ public func relu(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -701,8 +701,8 @@ public func softmax(
             .buffer(B.buffer),
             .buffer(global_max.buffer),
             .buffer(denom.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -767,8 +767,8 @@ public func max_simd(
             args: [
                 .buffer(cur.buffer),
                 .buffer(out.buffer),
-                .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                bytes(&n),
+                bytes(&b)
             ],
             grid: MTLSize(
                 width: nextN,
@@ -821,8 +821,8 @@ public func sum_simd(
             args: [
                 .buffer(cur.buffer),
                 .buffer(out.buffer),
-                .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                bytes(&n),
+                bytes(&b)
             ],
             grid: MTLSize(
                 width: nextN,
@@ -877,8 +877,8 @@ public func mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                    bytes(&n),
+                    bytes(&b)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -899,8 +899,8 @@ public func mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                    bytes(&n),
+                    bytes(&b)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -956,8 +956,8 @@ public func abs_mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                    bytes(&n),
+                    bytes(&b)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -978,8 +978,8 @@ public func abs_mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+                    bytes(&n),
+                    bytes(&b)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -1017,8 +1017,8 @@ public func conv_r3(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1051,8 +1051,8 @@ public func conv_r5(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1085,8 +1085,8 @@ public func conv_r7(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1119,8 +1119,8 @@ public func conv_r11(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1157,8 +1157,8 @@ public func inhib_sub_r3(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1196,8 +1196,8 @@ public func inhib_div_r7(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
+            bytes(&n),
+            bytes(&b)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1271,10 +1271,10 @@ public func cortex_step(
             .buffer(mu.buffer),
             .buffer(gamma.buffer),
             .buffer(beta.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&k), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&softlog_alpha), MemoryLayout<Float>.size),
-            .bytes(bytes(&inhib_alpha), MemoryLayout<Float>.size)
+            bytes(&n),
+            bytes(&k),
+            bytes(&softlog_alpha),
+            bytes(&inhib_alpha)
         ],
         grid: MTLSize(
             width: (Int(k)+255)/256,
@@ -1317,9 +1317,9 @@ public func final_oja_step(
             .buffer(eta.buffer),
             .buffer(A.buffer),
             .buffer(A_new.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&r), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&lambda), MemoryLayout<Float>.size)
+            bytes(&n),
+            bytes(&r),
+            bytes(&lambda)
         ],
         grid: MTLSize(
             width: (Int(r) + 255) / 256,
@@ -1363,12 +1363,12 @@ public func get_eta(
             .buffer(ACh.buffer),
             .buffer(DA.buffer),
             .buffer(eta.buffer),
-            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
-            .bytes(bytes(&w_NE), MemoryLayout<Float>.size),
-            .bytes(bytes(&w_ACh), MemoryLayout<Float>.size),
-            .bytes(bytes(&w_DA), MemoryLayout<Float>.size),
-            .bytes(bytes(&b), MemoryLayout<Float>.size),
-            .bytes(bytes(&eta_max), MemoryLayout<Float>.size)
+            bytes(&n),
+            bytes(&w_NE),
+            bytes(&w_ACh),
+            bytes(&w_DA),
+            bytes(&b),
+            bytes(&eta_max)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
