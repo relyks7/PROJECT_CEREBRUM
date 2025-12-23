@@ -5,50 +5,58 @@ import Darwin
 // ============================================================
 // 1. IMMUTABLE METAL CONTEXT (MULTI-METALLIB, THREAD-SAFE)
 // ============================================================
-
+@inline(__always)
+func bytes<T>(_ value: inout T) -> KernelArg {
+    return withUnsafeBytes(of: &value) {
+        KernelArg.bytes($0.baseAddress!, $0.count)
+    }
+}
 public final class MetalContext {
 
     public let device: MTLDevice
     public let libraries: [MTLLibrary]
     public let pipelines: [String: MTLComputePipelineState]
 
-    /// - Parameters:
-    ///   - metallibURLs: URLs to compiled .metallib files
-    ///   - kernelNames: kernel function names to load (must be unique globally)
-    public init(
-        metallibURLs: [URL],
-        kernelNames: [String]
-    ) {
+    /// Automatically loads all `.metallib` files from a directory
+    public init(kernelsDirectory: URL) {
         self.device = MTLCreateSystemDefaultDevice()!
 
-        // Load all libraries
+        let fm = FileManager.default
+
+        // 1. Discover metallibs
+        let urls = (try? fm.contentsOfDirectory(
+            at: kernelsDirectory,
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "metallib" } ?? []
+
+        precondition(!urls.isEmpty, "No .metallib files found in \(kernelsDirectory.path)")
+
+        // 2. Load libraries
         var libs: [MTLLibrary] = []
-        for url in metallibURLs {
+        for url in urls {
             let lib = try! device.makeLibrary(URL: url)
             libs.append(lib)
         }
         self.libraries = libs
 
-        // Build pipeline table
-        var tmp: [String: MTLComputePipelineState] = [:]
+        // 3. Discover kernels + build pipelines
+        var pipeTable: [String: MTLComputePipelineState] = [:]
 
-        for name in kernelNames {
-            var fn: MTLFunction? = nil
+        for lib in libs {
+            for name in lib.functionNames {
+                // Skip duplicates (first wins)
+                if pipeTable[name] != nil { continue }
 
-            // Search across libraries
-            for lib in libs {
-                if let f = lib.makeFunction(name: name) {
-                    fn = f
-                    break
-                }
+                guard let fn = lib.makeFunction(name: name) else { continue }
+
+                let pipe = try! device.makeComputePipelineState(function: fn)
+                pipeTable[name] = pipe
             }
-
-            precondition(fn != nil, "Kernel '\(name)' not found in any metallib")
-
-            tmp[name] = try! device.makeComputePipelineState(function: fn!)
         }
 
-        self.pipelines = tmp
+        precondition(!pipeTable.isEmpty, "No compute kernels found in metallibs")
+
+        self.pipelines = pipeTable
     }
 }
 
@@ -211,8 +219,8 @@ public func add(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(bytes(&n)), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -251,8 +259,8 @@ public func add4(
             .buffer(C.buffer),
             .buffer(D.buffer),
             .buffer(E.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -282,8 +290,8 @@ public func copy(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -310,8 +318,8 @@ public func zero(
         kernel: "zero",
         args: [
             .buffer(A.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -341,8 +349,8 @@ public func transpose(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&m, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&m), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 31) / 32,
@@ -375,8 +383,8 @@ public func div(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -409,8 +417,8 @@ public func mul(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -443,8 +451,8 @@ public func sub(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -479,9 +487,9 @@ public func embedding(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&d, MemoryLayout<UInt32>.size),
-            .bytes(&vocab_size, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&d), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&vocab_size), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -518,10 +526,10 @@ public func gemm(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
-            .bytes(&m, MemoryLayout<UInt32>.size),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&p, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&m), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&p), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: ((Int(p)+63)/64),
@@ -559,9 +567,9 @@ public func layernorm(
             .buffer(B.buffer),
             .buffer(mu.buffer),
             .buffer(sigma2.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&eps, MemoryLayout<Float>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&eps), MemoryLayout<Float>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -591,8 +599,8 @@ public func tanh(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -624,9 +632,9 @@ public func softlog(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&alpha, MemoryLayout<Float>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&alpha), MemoryLayout<Float>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -656,8 +664,8 @@ public func relu(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -693,8 +701,8 @@ public func softmax(
             .buffer(B.buffer),
             .buffer(global_max.buffer),
             .buffer(denom.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -745,7 +753,11 @@ public func max_simd(
         if nextN == 1{
             out=B
         } else{
-            out=toggle?scratch0:scratch1
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
             toggle.toggle()
         }
         var n = UInt32(curN)
@@ -755,8 +767,8 @@ public func max_simd(
             args: [
                 .buffer(cur.buffer),
                 .buffer(out.buffer),
-                .bytes(&n, MemoryLayout<UInt32>.size),
-                .bytes(&b, MemoryLayout<UInt32>.size)
+                .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                .bytes(bytes(&b), MemoryLayout<UInt32>.size)
             ],
             grid: MTLSize(
                 width: nextN,
@@ -795,7 +807,11 @@ public func sum_simd(
         if nextN == 1{
             out=B
         } else{
-            out=toggle?scratch0:scratch1
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
             toggle.toggle()
         }
         var n = UInt32(curN)
@@ -805,8 +821,8 @@ public func sum_simd(
             args: [
                 .buffer(cur.buffer),
                 .buffer(out.buffer),
-                .bytes(&n, MemoryLayout<UInt32>.size),
-                .bytes(&b, MemoryLayout<UInt32>.size)
+                .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                .bytes(bytes(&b), MemoryLayout<UInt32>.size)
             ],
             grid: MTLSize(
                 width: nextN,
@@ -846,7 +862,11 @@ public func mean_simd(
         if nextN == 1{
             out=B
         } else{
-            out=toggle?scratch0:scratch1
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
             toggle.toggle()
         }
         var n = UInt32(curN)
@@ -857,8 +877,8 @@ public func mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(&n, MemoryLayout<UInt32>.size),
-                    .bytes(&b, MemoryLayout<UInt32>.size)
+                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -879,8 +899,8 @@ public func mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(&n, MemoryLayout<UInt32>.size),
-                    .bytes(&b, MemoryLayout<UInt32>.size)
+                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -921,7 +941,11 @@ public func abs_mean_simd(
         if nextN == 1{
             out=B
         } else{
-            out=toggle?scratch0:scratch1
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
             toggle.toggle()
         }
         var n = UInt32(curN)
@@ -932,8 +956,8 @@ public func abs_mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(&n, MemoryLayout<UInt32>.size),
-                    .bytes(&b, MemoryLayout<UInt32>.size)
+                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -954,8 +978,8 @@ public func abs_mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
-                    .bytes(&n, MemoryLayout<UInt32>.size),
-                    .bytes(&b, MemoryLayout<UInt32>.size)
+                    .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+                    .bytes(bytes(&b), MemoryLayout<UInt32>.size)
                 ],
                 grid: MTLSize(
                     width: nextN,
@@ -993,8 +1017,8 @@ public func conv_r3(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1027,8 +1051,8 @@ public func conv_r5(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1061,8 +1085,8 @@ public func conv_r7(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1095,8 +1119,8 @@ public func conv_r11(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1133,8 +1157,8 @@ public func inhib_sub_r3(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1172,8 +1196,8 @@ public func inhib_div_r7(
             .buffer(A.buffer),
             .buffer(W.buffer),
             .buffer(B.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&b), MemoryLayout<UInt32>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 127) / 128,
@@ -1247,10 +1271,10 @@ public func cortex_step(
             .buffer(mu.buffer),
             .buffer(gamma.buffer),
             .buffer(beta.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&k, MemoryLayout<UInt32>.size),
-            .bytes(&softlog_alpha, MemoryLayout<Float>.size),
-            .bytes(&inhib_alpha, MemoryLayout<Float>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&k), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&softlog_alpha), MemoryLayout<Float>.size),
+            .bytes(bytes(&inhib_alpha), MemoryLayout<Float>.size)
         ],
         grid: MTLSize(
             width: (Int(k)+255)/256,
@@ -1293,9 +1317,9 @@ public func final_oja_step(
             .buffer(eta.buffer),
             .buffer(A.buffer),
             .buffer(A_new.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&r, MemoryLayout<UInt32>.size),
-            .bytes(&lambda, MemoryLayout<Float>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&r), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&lambda), MemoryLayout<Float>.size)
         ],
         grid: MTLSize(
             width: (Int(r) + 255) / 256,
@@ -1339,12 +1363,12 @@ public func get_eta(
             .buffer(ACh.buffer),
             .buffer(DA.buffer),
             .buffer(eta.buffer),
-            .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&w_NE, MemoryLayout<Float>.size),
-            .bytes(&w_ACh, MemoryLayout<Float>.size),
-            .bytes(&w_DA, MemoryLayout<Float>.size),
-            .bytes(&b, MemoryLayout<Float>.size),
-            .bytes(&eta_max, MemoryLayout<Float>.size)
+            .bytes(bytes(&n), MemoryLayout<UInt32>.size),
+            .bytes(bytes(&w_NE), MemoryLayout<Float>.size),
+            .bytes(bytes(&w_ACh), MemoryLayout<Float>.size),
+            .bytes(bytes(&w_DA), MemoryLayout<Float>.size),
+            .bytes(bytes(&b), MemoryLayout<Float>.size),
+            .bytes(bytes(&eta_max), MemoryLayout<Float>.size)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1619,3 +1643,62 @@ final class CortexPrime{
         stream.advance()
     }
 }
+let ctx = MetalContext(
+    kernelsDirectory: URL(fileURLWithPath: "kernels")
+)
+
+let stream = ComputeStream(context: ctx)
+let device = ctx.device
+
+let n: UInt32 = 128
+let k: UInt32 = 16
+let r: UInt32 = 32
+
+let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
+
+let W_conv_r3  = GPUBuffer<Float>(device: device, capacity: 7)
+let W_conv_r5  = GPUBuffer<Float>(device: device, capacity: 11)
+let W_conv_r7  = GPUBuffer<Float>(device: device, capacity: 15)
+let W_conv_r11 = GPUBuffer<Float>(device: device, capacity: 23)
+
+let W_inhib_sub_r3 = GPUBuffer<Float>(device: device, capacity: 7)
+let W_inhib_div_r7 = GPUBuffer<Float>(device: device, capacity: 15)
+
+let beta = GPUBuffer<Float>(device: device, capacity: Int(n))
+
+zero(stream: stream, B, n*r, 1)
+zero(stream: stream, beta, n, 1)
+
+zero(stream: stream, W_conv_r3, 7, 1)
+zero(stream: stream, W_conv_r5, 11, 1)
+zero(stream: stream, W_conv_r7, 15, 1)
+zero(stream: stream, W_conv_r11, 23, 1)
+
+zero(stream: stream, W_inhib_sub_r3, 7, 1)
+zero(stream: stream, W_inhib_div_r7, 15, 1)
+
+stream.synchronize()
+
+let cortex = CortexPrime(
+    device: device,
+    stream: stream,
+    n: n,
+    k: k,
+    r: r,
+    B: B,
+    W_conv_r3: W_conv_r3,
+    W_conv_r5: W_conv_r5,
+    W_conv_r7: W_conv_r7,
+    W_conv_r11: W_conv_r11,
+    W_inhib_sub_r3: W_inhib_sub_r3,
+    W_inhib_div_r7: W_inhib_div_r7,
+    beta: beta,
+    softlog_alpha: 1.0,
+    inhib_alpha: 1.0,
+    lambda: 1e-4,
+    eta_max: 1e-2,
+    oja_bias: 0.0,
+    w_NE: 1.0,
+    w_ACh: 1.0,
+    w_DA: 1.0
+)
