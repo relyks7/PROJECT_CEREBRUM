@@ -1137,31 +1137,40 @@ public func cortex_step(
     )
     stream.advance()
 }
-public func proj_mul(
+public func final_oja_step(
     stream: ComputeStream,
+    _ G1: GPUBuffer <Float>,
+    _ G2: GPUBuffer <Float>,
+    _ eta: GPUBuffer <Float>,
     _ A: GPUBuffer <Float>,
-    _ B: GPUBuffer <Float>,
-    _ C: GPUBuffer <Float>,
+    _ A_new: GPUBuffer <Float>,
     _ n_: UInt32,
-    _ b_: UInt32
+    _ r_: UInt32,
+    _ lambda_: Float
 ){
-    precondition(A.count == Int(n_*b_), "A has wrong size")
-    precondition(B.count == Int(b_), "B has wrong size")
-    precondition(C.count == Int(n_*b_), "C has wrong size")
+    precondition(G1.count == Int(n_*r_), "G1 has wrong size")
+    precondition(G2.count == Int(n_*r_), "G2 has wrong size")
+    precondition(eta.count == Int(n_), "eta has wrong size")
+    precondition(A.count == Int(n_*r_), "A has wrong size")
+    precondition(A_new.count == Int(n_*r_), "A_new has wrong size")
     var n=n_
-    var b=b_
+    var r=r_
+    var lambda=lambda_
     stream.dispatch(
-        kernel: "proj_mul",
+        kernel: "final_oja_step",
         args: [
+            .buffer(G1.buffer),
+            .buffer(G2.buffer),
+            .buffer(eta.buffer),
             .buffer(A.buffer),
-            .buffer(B.buffer),
-            .buffer(C.buffer),
+            .buffer(A_new.buffer),
             .bytes(&n, MemoryLayout<UInt32>.size),
-            .bytes(&b, MemoryLayout<UInt32>.size)
+            .bytes(&r, MemoryLayout<UInt32>.size),
+            .bytes(&lambda, MemoryLayout<Float>.size)
         ],
         grid: MTLSize(
-            width: (Int(n) + 255) / 256,
-            height: Int(b),
+            width: (Int(r) + 255) / 256,
+            height: Int(n),
             depth: 1
         ),
         threads: MTLSize(
@@ -1219,4 +1228,36 @@ public func get_eta(
             depth: 1
         )
     )
+}
+//NB: ASSUME B_t IS ALREADY SET (given that B is constant)
+public func oja(
+    stream: ComputeStream,
+    _ A: GPUBuffer<Float>,
+    _ A_new: GPUBuffer<Float>,
+    _ B: GPUBuffer<Float>,
+    _ eta: GPUBuffer<Float>,
+    _ B_t: GPUBuffer<Float>,
+    _ T1: GPUBuffer<Float>,
+    _ T2: GPUBuffer<Float>,
+    _ S: GPUBuffer<Float>,
+    _ U: GPUBuffer<Float>,
+    _ G: GPUBuffer<Float>,
+    _ H: GPUBuffer<Float>,
+    _ X: GPUBuffer<Float>,
+    _ Y: GPUBuffer<Float>,
+    _ Y_t: GPUBuffer<Float>,
+    _ r_: UInt32,
+    _ n_: UInt32,
+    _ k_: UInt32,
+    _ lambda_: Float,
+){
+    transpose(stream: stream, Y, Y_t, n_, k_)
+    gemm(stream: stream, Y_t, B, T1, k_, n_, r_, 1)
+    gemm(stream: stream, Y_t, A, T2, k_, n_, r_, 1)
+    gemm(stream: stream, B_t, B, S, r_, n_, r_, 1)
+    gemm(stream: stream, T2, S, U, k_, r_, r_, 1)
+    gemm(stream: stream, X, T1, G, n_, k_, r_, 1)
+    gemm(stream: stream, Y, U, H, n_, k_, r_, 1)
+    final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_)
+    copy(stream: stream, A_new, A, n_*r_, 1)
 }
