@@ -1,5 +1,5 @@
 # CORTEX-PRIME (v7)
-## Complete Mathematical Specification of the Irreducible Cortical Atom
+## Complete Mathematical Specification of the Irreducible Cortical Atom  
 *(Bio-Aligned · Locally Implementable · Synchronization-Free)*
 
 ---
@@ -39,8 +39,8 @@ This object is the **irreducible cortical atom**.
 H_t \in \mathbb{R}^{k \times n}
 \]
 
-- \(n\): number of cortical neurons arranged on a 2-D sheet
-- \(k\): internal vector state per neuron
+- \(n\): number of cortical neurons arranged on a 2-D sheet  
+- \(k\): internal vector state per neuron  
 
 Each neuron is **vector-valued**, not scalar.
 
@@ -142,20 +142,14 @@ Kernel properties:
 
 ### Multi-Scale Extension
 
-To avoid a single privileged interaction distance, the operator may be expressed as a pyramid:
-
 \[
 X^{(m)} = \sum_{s} \mathcal{S}^{(s)}_{\text{conv}}(H_t)
 \]
-
-with kernels of increasing receptive field.
 
 Interpretation:
 - intracortical horizontal fibers
 - mesoscopic signal diffusion
 - preservation of high-dimensional structure
-
-Small-world behavior emerges implicitly through repeated local transport.
 
 ---
 
@@ -182,8 +176,6 @@ Interpretation:
 - NE amplifies global coordination
 - ACh emphasizes spatially precise processing
 
-No explicit error signals are used.
-
 ---
 
 ## 3.4 Neuronal Saturation (Excitation Control)
@@ -208,26 +200,21 @@ Cortex performs **local**, not global, normalization.
 
 Let neurons be indexed by position \(i\).
 
-Let \(K_{ij}\) be a fixed local inhibitory kernel.
-
 ### Subtractive inhibition
 \[
-\mu_i =
-\sum_{j \in \mathcal{N}(i)} K_{ij} \, H_{\text{raw},j}
+\mu_i = \sum_{j \in \mathcal{N}(i)} K_{ij} \, H_{\text{raw},j}
 \]
 
 ### Divisive inhibition
 \[
-\gamma_i =
-\sum_{j \in \mathcal{N}(i)} K_{ij} \, |H_{\text{raw},j}|
+\gamma_i = \sum_{j \in \mathcal{N}(i)} K_{ij} \, |H_{\text{raw},j}|
 \]
 
 ### Chemically Modulated Inhibition Gain
 
-Let:
-- \(\beta_i = \beta_0 \cdot h_{\text{ACh}}(\text{ACh}_{t,i})\)
-
-High ACh sharpens inhibition; low ACh relaxes it.
+\[
+\beta_i = \beta_0 \cdot h_{\text{ACh}}(\text{ACh}_{t,i})
+\]
 
 ### State Update
 \[
@@ -257,12 +244,6 @@ Let:
 X = H_t, \quad Y = H_{t+1}
 \]
 
-Hebbian core:
-\[
-\Delta W \propto X Y^\top
-\]
-
-Oja stabilization:
 \[
 \Delta W \propto X Y^\top - Y Y^\top W
 \]
@@ -286,7 +267,7 @@ Y^\top (X B^\top - Y A)
 \right)
 \]
 
-The mesoscopic convolutional operator is **not plastic** at this timescale.
+\(B\) is fixed, random, and approximately orthonormal.
 
 ---
 
@@ -297,57 +278,40 @@ Learning rate is regulated by **chemical fields**, not objectives.
 ### 5.1 Neuromodulator Fields
 
 \[
-\text{DA}_t,\ \text{ACh}_t,\ \text{NE}_t,\ \text{5HT}_t \in \mathbb{R}^n
+\text{NE}_t,\ \text{ACh}_t,\ \text{DA}_t \in \mathbb{R}^n
 \]
 
 Roles:
-- DA: reinforcement and association
-- ACh: precision and plasticity
-- NE: global gain and synchronization
-- 5-HT: stability and consolidation
+- NE: global alertness and coordination
+- ACh: precision and attention
+- DA: reinforcement and motivation
+
+(5-HT omitted at base level; optional for long-timescale consolidation.)
 
 ---
 
-### 5.2 Rank Profiles (Fixed Parameters)
+### 5.2 Neuromodulated Learning Rate
 
-Each neuromodulator projects onto low-rank axes:
-
+Define:
 \[
-d_{\text{DA}}, d_{\text{ACh}}, d_{\text{NE}}, d_{\text{5HT}} \in \mathbb{R}^r
-\]
-
-Baseline:
-\[
-b \in \mathbb{R}^r
-\]
-
----
-
-### 5.3 Neuromodulated Learning Rate Field
-
-\[
-Z_t =
-\text{DA}_t d_{\text{DA}}^\top
-+
-\text{ACh}_t d_{\text{ACh}}^\top
-+
-\text{NE}_t d_{\text{NE}}^\top
-+
-\text{5HT}_t d_{\text{5HT}}^\top
-+
-\mathbf{1}_n b^\top
+z_i = w_{\text{NE}}\text{NE}_{t,i}
++ w_{\text{ACh}}\text{ACh}_{t,i}
++ w_{\text{DA}}\text{DA}_{t,i}
++ b
 \]
 
 \[
-\eta_t =
-\eta_{\max} \, \sigma(Z_t)
+\eta_i =
+\eta_{\max} \cdot
+\text{clamp}(z_i,\ 0,\ 1)
 \]
 
-Plasticity is:
-- spatially structured
-- chemically gated
+Properties:
+- \(\eta \in \mathbb{R}^n\)
 - bounded
-- low-rank
+- local
+- biologically plausible
+- synchronization-free
 
 ---
 
@@ -362,11 +326,6 @@ A \leftarrow \frac{A}{\|A\|}
 \[
 A \leftarrow (1 - \lambda) A
 \]
-
-Represents:
-- turnover
-- homeostasis
-- forgetting
 
 ---
 

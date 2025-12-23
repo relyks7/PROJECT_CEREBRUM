@@ -387,7 +387,6 @@ public func sub(
         )
     )
 }
-
 public func embedding(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -1137,4 +1136,87 @@ public func cortex_step(
         )
     )
     stream.advance()
+}
+public func proj_mul(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "proj_mul",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&b, MemoryLayout<UInt32>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func get_eta(
+    stream: ComputeStream,
+    _ NE: GPUBuffer <Float>,
+    _ ACh: GPUBuffer <Float>,
+    _ DA: GPUBuffer <Float>,
+    _ eta: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ w_NE_: Float,
+    _ w_ACh_: Float,
+    _ w_DA_: Float,
+    _ b_: Float,
+    _ eta_max_: Float
+){
+    precondition(NE.count == Int(n_), "NE has wrong size")
+    precondition(ACh.count == Int(n_), "ACh has wrong size")
+    precondition(DA.count == Int(n_), "DA has wrong size")
+    precondition(eta.count == Int(n_), "eta has wrong size")
+    var n=n_
+    var w_NE=w_NE_
+    var w_ACh=w_ACh_
+    var w_DA=w_DA_
+    var b=b_
+    var eta_max=eta_max_
+    stream.dispatch(
+        kernel: "get_eta",
+        args: [
+            .buffer(NE.buffer),
+            .buffer(ACh.buffer),
+            .buffer(DA.buffer),
+            .buffer(eta.buffer),
+            .bytes(&n, MemoryLayout<UInt32>.size),
+            .bytes(&w_NE, MemoryLayout<Float>.size),
+            .bytes(&w_ACh, MemoryLayout<Float>.size),
+            .bytes(&w_DA, MemoryLayout<Float>.size),
+            .bytes(&b, MemoryLayout<Float>.size),
+            .bytes(&eta_max, MemoryLayout<Float>.size)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
 }
