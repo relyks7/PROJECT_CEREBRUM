@@ -24,8 +24,6 @@ public func cortex_setup() -> (CortexPrime, GPUBuffer<Float>, ComputeStream, UIn
 
     let beta   = GPUBuffer<Float>(device: device, capacity: Int(n))
     let test_E = GPUBuffer<Float>(device: device, capacity: Int(n*k))
-
-    zero(stream: cortex_stream, B, n*r, 1)
     zero(stream: cortex_stream, beta, n, 1)
     zero(stream: cortex_stream, test_E, n*k, 1)
     zero(stream: cortex_stream, W_conv_r3, 7, 1)
@@ -34,8 +32,10 @@ public func cortex_setup() -> (CortexPrime, GPUBuffer<Float>, ComputeStream, UIn
     zero(stream: cortex_stream, W_conv_r11, 23, 1)
     zero(stream: cortex_stream, W_inhib_sub_r3, 7, 1)
     zero(stream: cortex_stream, W_inhib_div_r7, 15, 1)
+    cortex_stream.advance()
+    cortex_stream.synchronize()
     for i in 0..<Int(n) {
-        beta.ptr()[i] = 0.5
+        beta.ptr()[i] = 1.5
     }
     let a_conv_r3: [Float] = [
         0.05, 0.10, 0.20, 0.30, 0.20, 0.10, 0.05
@@ -72,10 +72,12 @@ public func cortex_setup() -> (CortexPrime, GPUBuffer<Float>, ComputeStream, UIn
     load(a_inhib_sub_r3, into: W_inhib_sub_r3)
     load(a_inhib_div_r7, into: W_inhib_div_r7)
     for i in 0..<(n*r) {
-        B.ptr()[Int(i)] = Float.random(in: -0.05...0.05)
+        B.ptr()[Int(i)] = Float.random(in: -0.005...0.005)
     }
-
-    cortex_stream.synchronize()
+    let scaleB = 1.0 / sqrt(Float(n))
+    for i in 0..<(n * r) {
+        B.ptr()[Int(i)] *= scaleB
+    }
 
     let cortex = CortexPrime(
         device: device,
@@ -91,69 +93,180 @@ public func cortex_setup() -> (CortexPrime, GPUBuffer<Float>, ComputeStream, UIn
         W_inhib_sub_r3: W_inhib_sub_r3,
         W_inhib_div_r7: W_inhib_div_r7,
         beta: beta,
-        softlog_alpha: 1.7,
-        mes_alpha: 0.05,
-        inhib_alpha: 1.0,
+        softlog_alpha: 0.8,
+        mes_alpha: 0.08,
+        inhib_alpha: 1.2,
         lambda: 1e-4,
         eta_max: 1e-2,
         oja_bias: 0.0,
         w_NE: 0.5,
         w_ACh: 1.0,
-        w_DA: 2.0
+        w_DA: 2.0,
+        dt: 0.02,
+        alpha_gamma: 1.0,
+        leak: 0.003
     )
+    cortex_stream.advance()
+    cortex_stream.synchronize()
     for i in 0..<(n*r) {
-        cortex.A.ptr()[Int(i)] = Float.random(in: -0.02...0.02)
+        cortex.A.ptr()[Int(i)] = Float.random(in: -0.01...0.01)
     }
-    cortex.zero_state()
+    let scaleA = 1.0 / sqrt(Float(r))
+    for i in 0..<(n * r) {
+        cortex.A.ptr()[Int(i)] *= scaleA
+    }
+    for i in 0..<Int(n * k) {
+        cortex.H_t0.ptr()[i] = Float.random(in: -0.01...0.01)
+    }
     return (cortex, test_E, cortex_stream, n, k)
 }
 let (cortex, test_E, stream, n, k) = cortex_setup()
+// ==================================================
+// CORTEX VALIDATION SUITE
+// ==================================================
 
-// --------------------------------------------------
-// ATTRACTOR TEST (OUTSIDE SETUP)
-// --------------------------------------------------
-
-// Allocate buffer to store previous state
-let H_prev = GPUBuffer<Float>(
-    device: cortex.device,
-    capacity: Int(n * k)
-)
-
-// 1. Inject a brief random pulse
-for i in 0..<Int(n * k) {
-    test_E.ptr()[i] = Float.random(in: -0.5...0.5)
-}
-
-// 2. Apply pulse once
-cortex.step(E_t: test_E)
-stream.synchronize()
-
-// 3. Remove input
-zero(stream: stream, test_E, n * k, 1)
-stream.synchronize()
-
-// 4. Run free dynamics
-let steps = 100
-
-for t in 0..<steps {
-
-    // --- SNAPSHOT PREVIOUS STATE ---
-    copy(stream: stream, cortex.H_t0, H_prev, n * k, 1)
-    stream.synchronize()
-
-    // --- ADVANCE DYNAMICS ---
-    cortex.step(E_t: test_E)
-    stream.synchronize()
-
-    // --- MEASURE CHANGE ---
-    let h0 = H_prev.ptr()
-    let h1 = cortex.H_t0.ptr()
-
-    var delta: Float = 0.0
-    for i in 0..<Int(n * k) {
-        let d = h1[i] - h0[i]
-        delta += d * d
+@inline(__always)
+func l2(_ a: GPUBuffer<Float>, _ b: GPUBuffer<Float>, count: Int) -> Float {
+    var s: Float = 0
+    let pa = a.ptr()
+    let pb = b.ptr()
+    for i in 0..<count {
+        let d = pa[i] - pb[i]
+        s += d * d
     }
-
-    print("step \(t): ΔH =", delta)
+    return sqrt(s)
 }
+
+@inline(__always)
+func cosine(_ a: GPUBuffer<Float>, _ b: GPUBuffer<Float>, count: Int) -> Float {
+    var dot: Float = 0
+    var na: Float = 0
+    var nb: Float = 0
+    let pa = a.ptr()
+    let pb = b.ptr()
+    for i in 0..<count {
+        let x = pa[i]
+        let y = pb[i]
+        dot += x * y
+        na += x * x
+        nb += y * y
+    }
+    return dot / (sqrt(na * nb) + 1e-8)
+}
+
+let countI = Int(n * k)
+let countU = UInt32(n * k)
+
+// --------------------------------------------------
+// TEST 1: FIXED POINT CONVERGENCE
+// --------------------------------------------------
+var prevΔ: Float = .infinity
+var converges = true
+
+for _ in 0..<100 {
+    cortex.step(E_t: test_E)
+    stream.advance()
+    stream.synchronize()
+
+    let d = l2(cortex.H_t0, cortex.H_t1, count: countI)
+    if d > prevΔ { converges = false }
+    prevΔ = d
+}
+print("Convergence:", converges)
+
+// --------------------------------------------------
+// TEST 2: PERTURBATION RECOVERY
+// --------------------------------------------------
+let H_star = GPUBuffer<Float>(device: cortex.device, capacity: countI)
+copy(stream: stream, cortex.H_t0, H_star, countU, 1)
+stream.advance()
+stream.synchronize()
+
+for i in 0..<countI {
+    cortex.H_t0.ptr()[i] += Float.random(in: -0.1...0.1)
+}
+
+for _ in 0..<150 {
+    cortex.step(E_t: test_E)
+}
+stream.advance()
+stream.synchronize()
+
+let recovery = l2(cortex.H_t0, H_star, count: countI) < 0.05
+print("Perturbation Recovery:", recovery)
+
+// --------------------------------------------------
+// TEST 3: INPUT EQUIVALENCE (SHIFT INVARIANCE)
+// --------------------------------------------------
+let E_shift = GPUBuffer<Float>(device: cortex.device, capacity: countI)
+let pk = Int(k)
+let pn = Int(n)
+
+for y in 0..<pn {
+    for x in 0..<pk {
+        E_shift.ptr()[y * pk + x] =
+            test_E.ptr()[((y + 3) % pn) * pk + x]
+    }
+}
+
+cortex.zero_state()
+for _ in 0..<150 {
+    cortex.step(E_t: test_E)
+}
+stream.advance()
+stream.synchronize()
+
+let H1 = GPUBuffer<Float>(device: cortex.device, capacity: countI)
+copy(stream: stream, cortex.H_t0, H1, countU, 1)
+
+cortex.zero_state()
+for _ in 0..<150 {
+    cortex.step(E_t: E_shift)
+}
+stream.advance()
+stream.synchronize()
+
+let equiv = cosine(H1, cortex.H_t0, count: countI) > 0.7
+print("Input Equivalence:", equiv)
+
+// --------------------------------------------------
+// TEST 4: HYSTERESIS (WORKING MEMORY)
+// --------------------------------------------------
+let E_alt = GPUBuffer<Float>(device: cortex.device, capacity: countI)
+for i in 0..<countI {
+    E_alt.ptr()[i] = Float.random(in: -0.5...0.5)
+}
+
+cortex.zero_state()
+for _ in 0..<120 { cortex.step(E_t: test_E) }
+for _ in 0..<20  { cortex.step(E_t: E_alt) }
+for _ in 0..<120 { cortex.step(E_t: test_E) }
+
+stream.advance()
+stream.synchronize()
+
+let hysteresis = l2(cortex.H_t0, H_star, count: countI) > 1e-3
+print("Hysteresis:", hysteresis)
+
+// --------------------------------------------------
+// TEST 5: ENERGY DESCENT
+// --------------------------------------------------
+var energyOK = true
+var prevE: Float = .infinity
+
+for _ in 0..<80 {
+    cortex.step(E_t: test_E)
+    stream.advance()
+    stream.synchronize()
+
+    let e = l2(cortex.H_t0, cortex.H_t1, count: countI)
+    if e > prevE { energyOK = false }
+    prevE = e
+}
+print("Energy Descent:", energyOK)
+
+// ==================================================
+// FINAL VERDICT
+// ==================================================
+let cortexWorks = converges && recovery && equiv && hysteresis && energyOK
+print("CORTEX FUNCTIONAL:", cortexWorks)

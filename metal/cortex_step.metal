@@ -12,12 +12,21 @@ kernel void cortex_step(
     constant uint& k[[buffer(8)]],
     constant float& softlog_alpha[[buffer(9)]],
     constant float& inhib_alpha[[buffer(10)]],
+    constant float& gamma0 [[buffer(11)]],
     uint2 i[[thread_position_in_grid]]
 ){
-    if (i.x<k && i.y<n){
-        uint idx=i.y*k+i.x;
-        float X=X_g[idx]+X_m[idx]+E_t[idx];
-        float aX=fabs(X);
-        H_t1[idx]=((X)*(log(1.0f+softlog_alpha*aX)/(1e-20+aX))-(inhib_alpha*mu[i.y]))/(1e-6+beta[i.y]*gamma[i.y]);
+    if (i.x < k && i.y < n) {
+        uint idx = i.y * k + i.x;
+
+        float X  = X_g[idx] + X_m[idx] + E_t[idx];
+        float aX = fabs(X);
+
+        float denomX = max(aX, 1e-6f);
+        float fX = X * log(1.0f + softlog_alpha * denomX) / denomX;
+
+        float div = max(gamma0 + beta[i.y] * gamma[i.y], 1e-3f);
+        float sub = inhib_alpha * mu[i.y];
+
+        H_t1[idx] = (fX / div) - sub;
     }
 }
