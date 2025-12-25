@@ -43,6 +43,11 @@ public func cortex_step(
     _ alpha_gamma_: Float,
     _ dt: Float,
     _ leak_: Float,
+    _ NE_c: Float,
+    _ ACh_c: Float,
+    _ DA_c: Float,
+    _ w2_ACh_: Float,
+    _ w2_NE_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
     _ r_: UInt32
@@ -67,6 +72,8 @@ public func cortex_step(
     var inhib_alpha=inhib_alpha_
     var alpha_gamma=alpha_gamma_
     let leak=leak_
+    let g0=1.0+w2_NE*NE_c
+    let g1=1.0-w2_ACh*ACh_c
     stream.dispatch(
         kernel: "cortex_step",
         args: [
@@ -81,7 +88,9 @@ public func cortex_step(
             bytes(&k),
             bytes(&softlog_alpha),
             bytes(&inhib_alpha),
-            bytes(&alpha_gamma)
+            bytes(&alpha_gamma),
+            bytes(&g0),
+            bytes(&g1)
         ],
         grid: MTLSize(
             width: (Int(k)+255)/256,
@@ -94,7 +103,7 @@ public func cortex_step(
             depth: 1
         )
     )
-    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt, leak)
+    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt, leak*exp(-DA_c))
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
 }
 //NB: ASSUME B_t IS ALREADY SET (given that B is constant)
@@ -205,6 +214,8 @@ public final class CortexPrime{
     var mes_alpha: Float
     var dt: Float
     var leak: Float
+    var w2_NE: Float
+    var w2_ACh: Float
     init(device: MTLDevice, 
         stream: ComputeStream, 
         n: UInt32, 
@@ -227,6 +238,8 @@ public final class CortexPrime{
         w_NE: Float, 
         w_ACh: Float, 
         w_DA: Float,
+        w2_NE: Float,
+        w2_ACh: Float,
         dt: Float,
         alpha_gamma: Float,
         leak: Float){
@@ -291,8 +304,15 @@ public final class CortexPrime{
         self.dt=dt
         self.alpha_gamma=alpha_gamma
         self.leak=leak
+        self.w2_NE=w2_NE
+        self.w2_ACh=w2_ACh
     }
-    func step(E_t: GPUBuffer<Float>){
+    func step(
+        E_t: GPUBuffer<Float>,
+        NE_c: Float,
+        ACh_c: Float,
+        DA_c: Float
+    ){
         cortex_step(
             stream: stream,
             E_t,
@@ -335,10 +355,17 @@ public final class CortexPrime{
             alpha_gamma,
             dt,
             leak,
+            NE_c,
+            ACh_c,
+            DA_c,
+            w2_ACh,
+            w2_NE,
+            DA_c,
             n,
             k,
             r
         )
+        
         stream.advance()
     }
     func learn(
@@ -389,4 +416,113 @@ public final class CortexPrime{
         zero(stream: stream, gamma, n, 1)
         stream.advance()
     }
+}
+public func cortex_setup() -> CortexPrime{
+    let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
+
+    let W_conv_r3  = GPUBuffer<Float>(device: device, capacity: 7)
+    let W_conv_r5  = GPUBuffer<Float>(device: device, capacity: 11)
+    let W_conv_r7  = GPUBuffer<Float>(device: device, capacity: 15)
+    let W_conv_r11 = GPUBuffer<Float>(device: device, capacity: 23)
+
+    let W_inhib_sub_r3 = GPUBuffer<Float>(device: device, capacity: 7)
+    let W_inhib_div_r7 = GPUBuffer<Float>(device: device, capacity: 15)
+
+    let beta   = GPUBuffer<Float>(device: device, capacity: Int(n))
+    zero(stream: stream, beta, n, 1)
+    zero(stream: stream, W_conv_r3, 7, 1)
+    zero(stream: stream, W_conv_r5, 11, 1)
+    zero(stream: stream, W_conv_r7, 15, 1)
+    zero(stream: stream, W_conv_r11, 23, 1)
+    zero(stream: stream, W_inhib_sub_r3, 7, 1)
+    zero(stream: stream, W_inhib_div_r7, 15, 1)
+    stream.advance()
+    stream.synchronize()
+    for i in 0..<Int(n) {
+        beta.ptr()[i] = 1.5
+    }
+    let a_conv_r3: [Float] = [
+        0.05, 0.10, 0.20, 0.30, 0.20, 0.10, 0.05
+    ]
+    let a_conv_r5: [Float] = [
+        0.02, 0.04, 0.08, 0.12, 0.16,
+        0.20,
+        0.16, 0.12, 0.08, 0.04, 0.02
+    ]
+    let a_conv_r7: [Float] = [
+        0.01, 0.02, 0.04, 0.06, 0.09,
+        0.12, 0.15, 0.18, 0.15, 0.12,
+        0.09, 0.06, 0.04, 0.02, 0.01
+    ]
+    let a_conv_r11: [Float] = [
+        0.004, 0.008, 0.015, 0.025, 0.040,
+        0.060, 0.080, 0.100, 0.120, 0.140,
+        0.160, 0.180, 0.160, 0.140, 0.120,
+        0.100, 0.080, 0.060, 0.040, 0.025,
+        0.015, 0.008, 0.004
+    ]
+    let a_inhib_sub_r3: [Float] = [
+        0.25, 0.50, 0.75, 1.00, 0.75, 0.50, 0.25
+    ]
+    let a_inhib_div_r7: [Float] = [
+        0.05, 0.08, 0.12, 0.18, 0.25,
+        0.32, 0.38, 0.42, 0.38, 0.32,
+        0.25, 0.18, 0.12, 0.08, 0.05
+    ]
+    load(a_conv_r3, into: W_conv_r3)
+    load(a_conv_r5, into: W_conv_r5)
+    load(a_conv_r7, into: W_conv_r7)
+    load(a_conv_r11, into: W_conv_r11)
+    load(a_inhib_sub_r3, into: W_inhib_sub_r3)
+    load(a_inhib_div_r7, into: W_inhib_div_r7)
+    for i in 0..<(n*r) {
+        B.ptr()[Int(i)] = Float.random(in: -0.005...0.005)
+    }
+    let scaleB = 1.0 / sqrt(Float(n))
+    for i in 0..<(n * r) {
+        B.ptr()[Int(i)] *= scaleB
+    }
+
+    let cortex = CortexPrime(
+        device: device,
+        stream: stream,
+        n: n,
+        k: k,
+        r: r,
+        B: B,
+        W_conv_r3: W_conv_r3,
+        W_conv_r5: W_conv_r5,
+        W_conv_r7: W_conv_r7,
+        W_conv_r11: W_conv_r11,
+        W_inhib_sub_r3: W_inhib_sub_r3,
+        W_inhib_div_r7: W_inhib_div_r7,
+        beta: beta,
+        softlog_alpha: 0.8,
+        mes_alpha: 0.08,
+        inhib_alpha: 1.2,
+        lambda: 1e-4,
+        eta_max: 1e-2,
+        oja_bias: 0.0,
+        w_NE: 0.5,
+        w_ACh: 1.0,
+        w_DA: 2.0,
+        dt: 0.02,
+        alpha_gamma: 1.0,
+        leak: 0.003,
+        w2_NE:0.5,
+        w2_ACh:0.6
+    )
+    stream.advance()
+    stream.synchronize()
+    for i in 0..<(n*r) {
+        cortex.A.ptr()[Int(i)] = Float.random(in: -0.01...0.01)
+    }
+    let scaleA = 1.0 / sqrt(Float(r))
+    for i in 0..<(n * r) {
+        cortex.A.ptr()[Int(i)] *= scaleA
+    }
+    for i in 0..<Int(n * k) {
+        cortex.H_t0.ptr()[i] = Float.random(in: -0.01...0.01)
+    }
+    return cortex
 }

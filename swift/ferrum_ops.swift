@@ -35,6 +35,44 @@ public func add(
         )
     )
 }
+public func add_scaled(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ sa_: Float,
+    _ sb_: Float
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "add",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&sa),
+            bytes(&sb)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
 public func add4(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -104,6 +142,44 @@ public func axbpy(
             bytes(&n),
             bytes(&b),
             bytes(&Y),
+            bytes(&l)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+//dynamic system base
+public func dsb(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ l_: Float
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    var n=n_
+    var b=b_
+    var l=l_
+    stream.dispatch(
+        kernel: "dsb",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            bytes(&n),
+            bytes(&b),
             bytes(&l)
         ],
         grid: MTLSize(

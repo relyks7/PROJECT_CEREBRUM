@@ -13,12 +13,14 @@ kernel void cortex_step(
     constant float& softlog_alpha[[buffer(9)]],
     constant float& inhib_alpha[[buffer(10)]],
     constant float& gamma0 [[buffer(11)]],
+    constant float& g0 [[buffer(12)]],
+    constant float& g1 [[buffer(13)]],
     uint2 i[[thread_position_in_grid]]
 ){
     if (i.x < k && i.y < n) {
         uint idx = i.y * k + i.x;
 
-        float X  = X_g[idx] + X_m[idx] + E_t[idx];
+        float X  = g0*(g1*X_g[idx] + X_m[idx])+E_t[idx];
         float aX = fabs(X);
 
         float denomX = max(aX, 1e-6f);
