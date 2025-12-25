@@ -23,12 +23,11 @@ kernel void cortex_step(
         float X  = g0*(g1*X_g[idx] + X_m[idx])+E_t[idx];
         float aX = fabs(X);
 
-        float denomX = max(aX, 1e-6f);
-        float fX = X * log(1.0f + softlog_alpha * denomX) / denomX;
+        float softlog_val = X * log(1.0f + softlog_alpha * aX) / (aX + 1e-9f);
 
         float div = max(gamma0 + beta[i.y] * gamma[i.y], 1e-3f);
         float sub = inhib_alpha * mu[i.y];
 
-        H_t1[idx] = (fX / div) - sub;
+        H_t1[idx] = (softlog_val - sub) / div;
     }
 }

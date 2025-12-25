@@ -3,22 +3,22 @@ import Foundation
 import Darwin
 public func chemical_compress(
     stream: ComputeStream,
-    NE_: GPUBuffer<Float>,
-    ACh_: GPUBuffer<Float>,
-    DA_: GPUBuffer<Float>,
-    mean_scratch_0: GPUBuffer<Float>,
-    mean_scratch_1: GPUBuffer<Float>,
-    NE_0: GPUBuffer<Float>,
-    ACh_0: GPUBuffer<Float>,
-    DA_0: GPUBuffer<Float>,
-    NE_c: inout Float,
-    ACh_c: inout Float,
-    DA_c: inout Float,
-    n_: UInt32
+    _ NE_: GPUBuffer<Float>,
+    _ ACh_: GPUBuffer<Float>,
+    _ DA_: GPUBuffer<Float>,
+    _ mean_scratch_0: GPUBuffer<Float>,
+    _ mean_scratch_1: GPUBuffer<Float>,
+    _ NE_0: GPUBuffer<Float>,
+    _ ACh_0: GPUBuffer<Float>,
+    _ DA_0: GPUBuffer<Float>,
+    _ NE_c: inout Float,
+    _ ACh_c: inout Float,
+    _ DA_c: inout Float,
+    _ n_: UInt32
 ){
-    mean_simd(NE_, mean_scratch_0, mean_scratch_1, NE_0, n_, 1)
-    mean_simd(ACh_, mean_scratch_0, mean_scratch_1, ACh_0, n_, 1)
-    mean_simd(DA_, mean_scratch_0, mean_scratch_1, DA_0, n_, 1)
+    mean_simd(stream: stream, NE_, mean_scratch_0, mean_scratch_1, NE_0, n_, 1)
+    mean_simd(stream: stream, ACh_, mean_scratch_0, mean_scratch_1, ACh_0, n_, 1)
+    mean_simd(stream: stream, DA_, mean_scratch_0, mean_scratch_1, DA_0, n_, 1)
     stream.advance()
     stream.synchronize()
     NE_c  = max(0.0, min(NE_0.ptr()[0],  2.0))
@@ -52,10 +52,10 @@ public func thalamus_step(
 ){
     gemm(stream: stream, W_s, U_t, z_scratch0, m_, Ds_, 1, 1)
     gemm(stream: stream, W_cx, H_t0, z_scratch1, m_, n_*k_, 1, 1)
-    add_scaled(stream: stream, z_scratch0, z_scratch1, z_scratch2, m_, 1, 1, (1+w_NE_*NE_c)*(1+w_ACh_0*ACh_c), (1+w_NE_*NE_c)*(1-w_ACh_1*ACh_c))
+    add_scaled(stream: stream, z_scratch0, z_scratch1, z_scratch2, m_, 1, (1+w_NE_*NE_c)*(1+w_ACh_0*ACh_c), (1+w_NE_*NE_c)*(1-w_ACh_1*ACh_c))
     dsb(stream: stream, z_t0, z_scratch2, z_t1, m_, 1, lambda_t*exp(-DA_c))
     gemm(stream: stream, W_tc, z_t0, E_t, n_*k_, m_, 1, 1)
-    copy(z_t1, z_t0, m_, 1, 1)
+    copy(stream: stream, z_t1, z_t0, m_, 1)
 }
 public final class ThalamusPrime{
     //gpu
@@ -102,7 +102,7 @@ public final class ThalamusPrime{
         lambda_t: Float,
         w_ACh_0: Float,
         w_ACh_1: Float,
-        w_NE_: Float){
+        w_NE: Float){
         self.z_t0=GPUBuffer(device: device, capacity: Int(m))
         self.z_t1=GPUBuffer(device: device, capacity: Int(m))
         self.E_t=GPUBuffer(device: device, capacity: Int(n*k))
@@ -127,6 +127,9 @@ public final class ThalamusPrime{
         self.w_ACh_0=w_ACh_0
         self.w_ACh_1=w_ACh_1
         self.w_NE=w_NE
+        self.NE_c  = 0.0
+        self.ACh_c = 0.0
+        self.DA_c  = 0.0
     }
     func step(
         H_t0: GPUBuffer<Float>,
@@ -175,9 +178,9 @@ public final class ThalamusPrime{
             NE_0,
             ACh_0,
             DA_0,
-            NE_c,
-            ACh_c,
-            DA_c,
+            &NE_c,
+            &ACh_c,
+            &DA_c,
             n
         )
     }

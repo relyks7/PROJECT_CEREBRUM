@@ -50,6 +50,8 @@ public func add_scaled(
     precondition(C.count == Int(n_*b_), "C has wrong size")
     var n=n_
     var b=b_
+    var sa=sa_
+    var sb=sb_
     stream.dispatch(
         kernel: "add",
         args: [

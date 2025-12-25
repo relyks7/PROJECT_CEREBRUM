@@ -72,8 +72,8 @@ public func cortex_step(
     var inhib_alpha=inhib_alpha_
     var alpha_gamma=alpha_gamma_
     let leak=leak_
-    let g0=1.0+w2_NE*NE_c
-    let g1=1.0-w2_ACh*ACh_c
+    var g0=1.0+w2_NE_*NE_c
+    var g1=1.0-w2_ACh_*ACh_c
     stream.dispatch(
         kernel: "cortex_step",
         args: [
@@ -360,7 +360,6 @@ public final class CortexPrime{
             DA_c,
             w2_ACh,
             w2_NE,
-            DA_c,
             n,
             k,
             r
@@ -506,11 +505,11 @@ public func cortex_setup() -> CortexPrime{
         w_NE: 0.5,
         w_ACh: 1.0,
         w_DA: 2.0,
+        w2_NE:0.5,
+        w2_ACh:0.6,
         dt: 0.02,
         alpha_gamma: 1.0,
-        leak: 0.003,
-        w2_NE:0.5,
-        w2_ACh:0.6
+        leak: 0.003
     )
     stream.advance()
     stream.synchronize()

@@ -42,21 +42,28 @@ public final class Cerebrum{
     ){
         chem_decay()
         Thalamus.chem_mean(
-            NE,
-            ACh,
-            DA
+            NE: NE,
+            ACh: ACh,
+            DA: DA
         )
         Thalamus.step(
-            Cortex.H_t0,
-            U_t
+            H_t0: Cortex.H_t0,
+            U_t: U_t
         )
-        Cortex.step(Thalamus.E_t)
+        Cortex.step(
+            E_t: Thalamus.E_t,
+            NE_c: Thalamus.NE_c,
+            ACh_c: Thalamus.ACh_c,
+            DA_c: Thalamus.DA_c
+        )
     }
     func learn(){
         Cortex.learn(
-            NE,
-            ACh,
-            DA
+            NE: NE,
+            ACh: ACh,
+            DA: DA
         )
     }
 }
+//Sextus est discipulus malus!
+let Sextus=Cerebrum()
