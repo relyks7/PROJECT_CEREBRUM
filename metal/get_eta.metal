@@ -14,7 +14,7 @@ kernel void get_eta(
     uint i[[thread_position_in_grid]]
 ){
     if (i<n){
-        float z=w_NE*NE[i]+w_ACh*ACh[i]+w_DA*DA[i]+b;
-        eta[i]=eta_max*max(0.0f, z * rsqrt(1.0f + z*z));
+        float z=max(0.0, w_NE*NE[i]-w_ACh*ACh[i]+w_DA*DA[i]+b);
+        eta[i]=eta_max * z * rsqrt(1.0f + z*z);
     }
 }

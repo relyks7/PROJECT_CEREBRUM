@@ -164,6 +164,7 @@ public func dsb(
     _ A: GPUBuffer <Float>,
     _ B: GPUBuffer <Float>,
     _ C: GPUBuffer <Float>,
+    _ G: GPUBuffer <Float>,
     _ n_: UInt32,
     _ b_: UInt32,
     _ l_: Float
@@ -171,6 +172,7 @@ public func dsb(
     precondition(A.count == Int(n_*b_), "A has wrong size")
     precondition(B.count == Int(n_*b_), "B has wrong size")
     precondition(C.count == Int(n_*b_), "C has wrong size")
+    precondition(G.count == Int(n_*b_), "G has wrong size")
     var n=n_
     var b=b_
     var l=l_
@@ -180,6 +182,7 @@ public func dsb(
             .buffer(A.buffer),
             .buffer(B.buffer),
             .buffer(C.buffer),
+            .buffer(G.buffer),
             bytes(&n),
             bytes(&b),
             bytes(&l)
@@ -214,6 +217,40 @@ public func copy(
             .buffer(B.buffer),
             bytes(&n),
             bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func sigmoid(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ e0_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    var e0=e0_
+    stream.dispatch(
+        kernel: "sigmoid",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&e0)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -643,15 +680,36 @@ public func outer_prod(
     _ A: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
     _ C: GPUBuffer<Float>,
-    _ n: UInt32,
-    _ m: UInt32,
-    _ b: UInt32
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ alpha_: Float
 ){
-    gemm(
-        stream: stream,
-        A, B, C,
-        n, 1, m,
-        b
+    precondition(A.count == Int(n_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    var n=n_
+    var b=b_
+    var alpha=alpha_
+    stream.dispatch(
+        kernel: "outer_prod",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&alpha)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
     )
 }
 public func max_simd(
@@ -1213,6 +1271,109 @@ public func get_eta(
             bytes(&w_DA),
             bytes(&b),
             bytes(&eta_max)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func bg_forward(
+    stream: ComputeStream,
+    _ S: GPUBuffer<Float>,
+    _ G: GPUBuffer<Float>,
+    _ M: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer <Float>,
+    _ scratch1: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ DA_c_: Float,
+    _ alpha_: Float,
+    _ beta_: Float,
+    _ kappa_: Float,
+    _ gamma_: Float
+){
+    precondition(S.count == Int(n_), "S has wrong size")
+    precondition(G.count == Int(n_), "G has wrong size")
+    var n=n_
+    var DA_c=DA_c_
+    var alpha=alpha_
+    var beta=beta_
+    var kappa=kappa_
+    var gamma=gamma_
+    stream.dispatch(
+        kernel: "bg_step",
+        args: [
+            .buffer(S.buffer),
+            .buffer(G.buffer),
+            bytes(&n),
+            bytes(&DA_c),
+            bytes(&alpha),
+            bytes(&beta),
+            bytes(&kappa)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+    mean_simd(stream: stream, G, scratch0, scratch1, M, n_, 1)
+    stream.dispatch(
+        kernel: "really_specific_kernel",
+        args: [
+            .buffer(G.buffer),
+            .buffer(M.buffer),
+            .buffer(G.buffer),
+            bytes(&n),
+            bytes(&gamma)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func bg_oja(
+    stream: ComputeStream,
+    _ g: GPUBuffer <Float>,
+    _ W: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ eta_: Float,
+    _ w_max_: Float
+){
+    precondition(g.count == Int(b_), "g has wrong size")
+    precondition(W.count == Int(n_*b_), "W has wrong size")
+    var n=n_
+    var b=b_
+    var eta=eta_
+    var w_max=w_max_
+    stream.dispatch(
+        kernel: "bg_oja",
+        args: [
+            .buffer(g.buffer),
+            .buffer(W.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&eta),
+            bytes(&w_max)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,

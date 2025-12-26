@@ -103,7 +103,7 @@ public func cortex_step(
             depth: 1
         )
     )
-    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt, leak*exp(-DA_c))
+    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt * (1.0 + w2_NE_ * NE_c), leak * exp(-DA_c))
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
 }
 //NB: ASSUME B_t IS ALREADY SET (given that B is constant)
@@ -496,20 +496,20 @@ public func cortex_setup() -> CortexPrime{
         W_inhib_sub_r3: W_inhib_sub_r3,
         W_inhib_div_r7: W_inhib_div_r7,
         beta: beta,
-        softlog_alpha: 0.8,
-        mes_alpha: 0.08,
-        inhib_alpha: 1.2,
-        lambda: 1e-4,
-        eta_max: 1e-2,
+        softlog_alpha: 1.2,
+        mes_alpha: 0.12,
+        inhib_alpha: 0.9,
+        lambda: 2e-5,
+        eta_max: 1e-4,
         oja_bias: 0.0,
-        w_NE: 0.5,
-        w_ACh: 1.0,
+        w_NE: 0.3,
+        w_ACh: 0.6,
         w_DA: 2.0,
-        w2_NE:0.5,
-        w2_ACh:0.6,
+        w2_NE: 0.03,
+        w2_ACh: 0.35,
         dt: 0.02,
-        alpha_gamma: 1.0,
-        leak: 0.003
+        alpha_gamma: 0.15,
+        leak: 0.01
     )
     stream.advance()
     stream.synchronize()

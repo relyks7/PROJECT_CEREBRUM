@@ -33,6 +33,7 @@ public func thalamus_step(
     _ z_scratch0: GPUBuffer<Float>,
     _ z_scratch1: GPUBuffer<Float>,
     _ z_scratch2: GPUBuffer<Float>,
+    _ g: GPUBuffer<Float>,
     _ E_t: GPUBuffer<Float>,
     _ W_tc: GPUBuffer<Float>,
     _ W_cx: GPUBuffer<Float>,
@@ -53,7 +54,7 @@ public func thalamus_step(
     gemm(stream: stream, W_s, U_t, z_scratch0, m_, Ds_, 1, 1)
     gemm(stream: stream, W_cx, H_t0, z_scratch1, m_, n_*k_, 1, 1)
     add_scaled(stream: stream, z_scratch0, z_scratch1, z_scratch2, m_, 1, (1+w_NE_*NE_c)*(1+w_ACh_0*ACh_c), (1+w_NE_*NE_c)*(1-w_ACh_1*ACh_c))
-    dsb(stream: stream, z_t0, z_scratch2, z_t1, m_, 1, lambda_t*exp(-DA_c))
+    dsb(stream: stream, z_t0, z_scratch2, z_t1, g, m_, 1, lambda_t*exp(-DA_c))
     gemm(stream: stream, W_tc, z_t0, E_t, n_*k_, m_, 1, 1)
     copy(stream: stream, z_t1, z_t0, m_, 1)
 }
@@ -133,6 +134,7 @@ public final class ThalamusPrime{
     }
     func step(
         H_t0: GPUBuffer<Float>,
+        g: GPUBuffer<Float>,
         U_t: GPUBuffer<Float>
     )
     {
@@ -144,6 +146,7 @@ public final class ThalamusPrime{
             z_scratch0,
             z_scratch1,
             z_scratch2,
+            g,
             E_t,
             W_tc,
             W_cx,
