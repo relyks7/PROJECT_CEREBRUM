@@ -51,11 +51,11 @@ public func thalamus_step(
     _ ACh_c: Float,
     _ DA_c: Float
 ){
-    gemm(stream: stream, W_s, U_t, z_scratch0, m_, Ds_, 1, 1)
-    gemm(stream: stream, W_cx, H_t0, z_scratch1, m_, n_*k_, 1, 1)
+    gemv(stream: stream, W_s, U_t, z_scratch0, m_, Ds_)
+    gemv(stream: stream, W_cx, H_t0, z_scratch1, m_, n_*k_)
     add_scaled(stream: stream, z_scratch0, z_scratch1, z_scratch2, m_, 1, (1+w_NE_*NE_c)*(1+w_ACh_0*ACh_c), (1+w_NE_*NE_c)*(1-w_ACh_1*ACh_c))
     dsb(stream: stream, z_t0, z_scratch2, z_t1, g, m_, 1, lambda_t*exp(-DA_c))
-    gemm(stream: stream, W_tc, z_t0, E_t, n_*k_, m_, 1, 1)
+    gemv(stream: stream, W_tc, z_t0, E_t, n_*k_, m_)
     copy(stream: stream, z_t1, z_t0, m_, 1)
 }
 public final class ThalamusPrime{

@@ -53,7 +53,7 @@ public func add_scaled(
     var sa=sa_
     var sb=sb_
     stream.dispatch(
-        kernel: "add",
+        kernel: "add_scaled",
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
@@ -212,6 +212,37 @@ public func copy(
     var b=b_
     stream.dispatch(
         kernel: "copy",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            bytes(&n),
+            bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func sqrt(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "sqrt",
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
@@ -491,13 +522,47 @@ public func gemm(
             bytes(&b)
         ],
         grid: MTLSize(
-            width: ((Int(p)+63)/64),
-            height: ((Int(m)+63)/64)*Int(b),
+            width: ((Int(p)+31)/32),
+            height: ((Int(m)+31)/32)*Int(b),
             depth: 1
         ),
         threads: MTLSize(
             width: 8,
             height: 64,
+            depth: 1
+        )
+    )
+}
+public func gemv(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ m_: UInt32,
+    _ n_: UInt32,
+){
+    precondition(A.count==Int(m_*n_))
+    precondition(B.count==Int(n_))
+    precondition(C.count==Int(m_))
+    var m=m_
+    var n=n_
+    stream.dispatch(
+        kernel: "gemv",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            bytes(&m),
+            bytes(&n)
+        ],
+        grid: MTLSize(
+            width: ((Int(m)+255)/256),
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
             depth: 1
         )
     )
@@ -638,7 +703,7 @@ public func relu(
         )
     )
 }
-public func softmax(
+public func softmax_final(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
     _ B: GPUBuffer<Float>,
@@ -674,6 +739,91 @@ public func softmax(
             depth: 1
         )
     )
+}
+public func softmax_simd(
+    stream: ComputeStream,
+    _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
+    _ B: GPUBuffer<Float>,
+    _ C: GPUBuffer<Float>,
+    _ global_max: GPUBuffer<Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    max_simd(stream: stream, A, scratch0, scratch1, global_max, n_, b_)
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    let batch = Int(b_)
+    var cur = A
+    var curN = Int(n_)
+    var toggle=false
+    var isfirst=true
+    while curN > 1 {
+        let nextN = (curN + 127) / 128
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
+            toggle.toggle()
+        }
+        var n = UInt32(curN)
+        var b = b_
+        if isfirst{
+            stream.dispatch(
+                kernel: "softmax_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .buffer(global_max.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+            isfirst=false
+        }
+        else{
+            stream.dispatch(
+                kernel: "sum_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+        }
+        if nextN == 1 { break }
+        cur = out
+        curN = nextN
+    }
+    softmax_final(stream: stream, A, C, global_max, B, n_, b_)
 }
 public func outer_prod(
     stream: ComputeStream,
@@ -857,6 +1007,88 @@ public func mean_simd(
                 args: [
                     .buffer(cur.buffer),
                     .buffer(out.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+            isfirst=false
+        }
+        else{
+            stream.dispatch(
+                kernel: "sum_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+        }
+        if nextN == 1 { return }
+        cur = out
+        curN = nextN
+    }
+}
+public func variance_simd(
+    stream: ComputeStream,
+    _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
+    _ B: GPUBuffer<Float>,
+    _ mu: GPUBuffer<Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    precondition(mu.count == Int(b_), "mu has wrong size")
+    let batch = Int(b_)
+    var cur = A
+    var curN = Int(n_)
+    var toggle=false
+    var isfirst=true
+    while curN > 1 {
+        let nextN = (curN + 127) / 128
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
+            toggle.toggle()
+        }
+        var n = UInt32(curN)
+        var b = b_
+        if isfirst{
+            stream.dispatch(
+                kernel: "variance_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    .buffer(mu.buffer),
                     bytes(&n),
                     bytes(&b)
                 ],
@@ -1284,11 +1516,52 @@ public func get_eta(
         )
     )
 }
+public func chem_decay_0(
+    stream: ComputeStream,
+    _ ACh: GPUBuffer <Float>,
+    _ DA: GPUBuffer <Float>,
+    _ NE: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ w_ACh_: Float,
+    _ w_DA_: Float,
+    _ w_NE_: Float
+){
+    precondition(NE.count == Int(n_), "NE has wrong size")
+    precondition(ACh.count == Int(n_), "ACh has wrong size")
+    precondition(DA.count == Int(n_), "DA has wrong size")
+    var n=n_
+    var w_NE=w_NE_
+    var w_ACh=w_ACh_
+    var w_DA=w_DA_
+    stream.dispatch(
+        kernel: "chem_decay",
+        args: [
+            .buffer(NE.buffer),
+            .buffer(ACh.buffer),
+            .buffer(DA.buffer),
+            bytes(&n),
+            bytes(&w_NE),
+            bytes(&w_ACh),
+            bytes(&w_DA)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
 public func bg_forward(
     stream: ComputeStream,
     _ S: GPUBuffer<Float>,
     _ G: GPUBuffer<Float>,
     _ M: GPUBuffer<Float>,
+    _ ST: GPUBuffer<Float>,
     _ scratch0: GPUBuffer <Float>,
     _ scratch1: GPUBuffer <Float>,
     _ n_: UInt32,
@@ -1329,12 +1602,14 @@ public func bg_forward(
         )
     )
     mean_simd(stream: stream, G, scratch0, scratch1, M, n_, 1)
+    variance_simd(stream: stream, G, scratch0, scratch1, ST, M, n_, 1)
+    sqrt(stream: stream, ST, ST, 1, 1)
     stream.dispatch(
         kernel: "really_specific_kernel",
         args: [
             .buffer(G.buffer),
             .buffer(M.buffer),
-            .buffer(G.buffer),
+            .buffer(ST.buffer),
             bytes(&n),
             bytes(&gamma)
         ],

@@ -11,12 +11,12 @@ kernel void bg_step(
     uint idx[[thread_position_in_grid]]
 ){
     if (idx<n){
-        float da = clamp(DA_c, -1.0f, 1.0f);
+        float da = clamp(DA_c, 0.0f, 1.0f);
         float go=S[idx]+alpha*da;
         float ngo=S[idx]-beta*da;
-        go=1/(1+exp(-go));
-        ngo=1/(1+exp(-ngo));
+        go  = 1/(1+exp(-go));
+        ngo = 1/(1+exp(-ngo));
         float U=(go-ngo)*kappa;
-        G[idx]=1/(1+exp(-U));
+        G[idx]=U;
     }
 }

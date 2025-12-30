@@ -15,20 +15,20 @@ kernel void gemm(
     uint si [[simdgroup_index_in_threadgroup]]
 )
 {
-    threadgroup float tA[T][T];
-    threadgroup float tB[T][T];
+    threadgroup half tA[T][T];
+    threadgroup half tB[T][T];
     simdgroup_float8x8 acc1; 
     simdgroup_float8x8 acc2; 
     simdgroup_float8x8 acc3; 
     simdgroup_float8x8 acc4; 
-    simdgroup_float8x8 matA1;
-    simdgroup_float8x8 matA2;
-    simdgroup_float8x8 matA3;
-    simdgroup_float8x8 matA4;
-    simdgroup_float8x8 matB1;
-    simdgroup_float8x8 matB2;
-    simdgroup_float8x8 matB3;
-    simdgroup_float8x8 matB4;
+    simdgroup_half8x8 matA1;
+    simdgroup_half8x8 matA2;
+    simdgroup_half8x8 matA3;
+    simdgroup_half8x8 matA4;
+    simdgroup_half8x8 matB1;
+    simdgroup_half8x8 matB2;
+    simdgroup_half8x8 matB3;
+    simdgroup_half8x8 matB4;
     acc1 = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
     acc2 = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
     acc3 = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
@@ -48,32 +48,32 @@ kernel void gemm(
     unsigned long offsetC = (unsigned long)layer * m * p;
     for (int curtile=0;curtile<(n+T-1)/T;curtile++){
         if (row < m && (curtile*T + i.x*8)+7 < n){
-            *(threadgroup float4*)(&tA[i.y][i.x*8]) = *(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8)]);
-            *(threadgroup float4*)(&tA[i.y][i.x*8+4]) = *(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8+4)]);
+            *(threadgroup half4*)(&tA[i.y][i.x*8]) = half4(*(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8)]));
+            *(threadgroup half4*)(&tA[i.y][i.x*8+4]) = half4(*(device const float4*)(&A[offsetA + row * n + (curtile * T + i.x * 8+4)]));
         }
         else{
-            *(threadgroup float4*)(&tA[i.y][i.x*8]) = float4(0.0f);
-            *(threadgroup float4*)(&tA[i.y][i.x*8+4]) = float4(0.0f);
+            *(threadgroup half4*)(&tA[i.y][i.x*8]) = half4(0.0f);
+            *(threadgroup half4*)(&tA[i.y][i.x*8+4]) = half4(0.0f);
         }
         if ((curtile*T + i.y) < n && col+7 < p){
-            *(threadgroup float4*)(&tB[i.y][i.x*8]) = *(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col]);
-            *(threadgroup float4*)(&tB[i.y][i.x*8+4]) = *(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col+4]);
+            *(threadgroup half4*)(&tB[i.y][i.x*8]) = half4(*(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col]));
+            *(threadgroup half4*)(&tB[i.y][i.x*8+4]) = half4(*(device const float4*)(&B[offsetB+(curtile*T + i.y)*p + col+4]));
         }
         else{
-            *(threadgroup float4*)(&tB[i.y][i.x*8]) = float4(0.0f);
-            *(threadgroup float4*)(&tB[i.y][i.x*8+4]) = float4(0.0f);
+            *(threadgroup half4*)(&tB[i.y][i.x*8]) = half4(0.0f);
+            *(threadgroup half4*)(&tB[i.y][i.x*8+4]) = half4(0.0f);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         #pragma unroll
         for (int k=0;k<T;k+=WIDTH*2){
-            simdgroup_load(matA1, (threadgroup float*)&tA[0][0], T+1, ulong2(k, offset.y));
-            simdgroup_load(matB1, (threadgroup float*)&tB[0][0], T+1, ulong2(offset.x, k));
-            simdgroup_load(matA2, (threadgroup float*)&tA[0][0], T+1, ulong2(k+8, offset.y));
-            simdgroup_load(matB2, (threadgroup float*)&tB[0][0], T+1, ulong2(offset.x+8, k));
-            simdgroup_load(matA3, (threadgroup float*)&tA[0][0], T+1, ulong2(k, offset.y+8));
-            simdgroup_load(matB3, (threadgroup float*)&tB[0][0], T+1, ulong2(offset.x, k+8));
-            simdgroup_load(matA4, (threadgroup float*)&tA[0][0], T+1, ulong2(k+8, offset.y+8));
-            simdgroup_load(matB4, (threadgroup float*)&tB[0][0], T+1, ulong2(offset.x+8, k+8));
+            simdgroup_load(matA1, (threadgroup half*)&tA[0][0], T, ulong2(k, offset.y));
+            simdgroup_load(matB1, (threadgroup half*)&tB[0][0], T, ulong2(offset.x, k));
+            simdgroup_load(matA2, (threadgroup half*)&tA[0][0], T, ulong2(k+8, offset.y));
+            simdgroup_load(matB2, (threadgroup half*)&tB[0][0], T, ulong2(offset.x+8, k));
+            simdgroup_load(matA3, (threadgroup half*)&tA[0][0], T, ulong2(k, offset.y+8));
+            simdgroup_load(matB3, (threadgroup half*)&tB[0][0], T, ulong2(offset.x, k+8));
+            simdgroup_load(matA4, (threadgroup half*)&tA[0][0], T, ulong2(k+8, offset.y+8));
+            simdgroup_load(matB4, (threadgroup half*)&tB[0][0], T, ulong2(offset.x+8, k+8));
             simdgroup_multiply_accumulate(acc1, matA1, matB1, acc1);
             simdgroup_multiply_accumulate(acc1, matA2, matB3, acc1);
 

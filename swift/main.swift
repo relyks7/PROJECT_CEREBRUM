@@ -20,24 +20,20 @@ public final class Cerebrum{
     let Thalamus: ThalamusPrime
     let BasalGanglia: BasalGangliaPrime
     init(){
-        NE=GPUBuffer(device: device, capacity: Int(n))
-        ACh=GPUBuffer(device: device, capacity: Int(n))
-        d_NE=0.995
-        d_ACh=0.998
-        d_DA=0.997
-        DA=GPUBuffer(device: device, capacity: Int(n))
-        Cortex=cortex_setup()
-        Thalamus=thalamus_setup()
-        BasalGanglia=bg_setup()
-        Cortex.zero_state()
-        Thalamus.zero_state()
+        self.NE=GPUBuffer(device: device, capacity: Int(n))
+        self.ACh=GPUBuffer(device: device, capacity: Int(n))
+        self.d_NE=0.995
+        self.d_ACh=0.998
+        self.d_DA=0.997
+        self.DA=GPUBuffer(device: device, capacity: Int(n))
+        self.Cortex=cortex_setup()
+        self.Thalamus=thalamus_setup()
+        self.BasalGanglia=bg_setup()
+        self.Cortex.zero_state()
+        self.Thalamus.zero_state()
     }
     func chem_decay() {
-        for i in 0..<Int(n) {
-            NE.ptr()[i]  *= d_NE
-            ACh.ptr()[i] *= d_ACh
-            DA.ptr()[i]  *= d_DA
-        }
+        chem_decay_0(stream: stream, ACh, DA, NE, n, d_ACh, d_DA, d_NE)
     }
     func step(
         U_t: GPUBuffer<Float>

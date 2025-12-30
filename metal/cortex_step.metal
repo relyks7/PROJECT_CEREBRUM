@@ -15,12 +15,13 @@ kernel void cortex_step(
     constant float& gamma0 [[buffer(11)]],
     constant float& g0 [[buffer(12)]],
     constant float& g1 [[buffer(13)]],
+    constant float& g2 [[buffer(14)]],
     uint2 i[[thread_position_in_grid]]
 ){
     if (i.x < k && i.y < n) {
         uint idx = i.y * k + i.x;
 
-        float X  = g0*(g1*(X_g[idx] + X_m[idx]))+E_t[idx];
+        float X  = g0*(g1*(X_g[idx] + X_m[idx])+g2*E_t[idx]);
         float aX = fabs(X);
 
         float softlog_val = X * log(1.0f + softlog_alpha * aX) / (aX + 1e-6f);

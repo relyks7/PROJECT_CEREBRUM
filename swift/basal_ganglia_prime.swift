@@ -12,6 +12,7 @@ public func bg_step(
     _ M: GPUBuffer<Float>,
     _ scratch0: GPUBuffer<Float>,
     _ scratch1: GPUBuffer<Float>,
+    _ ST: GPUBuffer<Float>,
     _ m_: UInt32,
     _ n_: UInt32,
     _ k_: UInt32,
@@ -21,9 +22,9 @@ public func bg_step(
     _ kappa_: Float,
     _ gamma_: Float
 ){
-    gemm(stream: stream, W_str, H_t0, s0, m_, n_*k_, 1, 1)
+    gemv(stream: stream, W_str, H_t0, s0, m_, n_*k_)
     add(stream: stream, s0, b_str, s, m_, 1)
-    bg_forward(stream: stream, s, g, M, scratch0, scratch1, m_, DA_c_, alpha_, beta_, kappa_, gamma_)
+    bg_forward(stream: stream, s, g, M, ST, scratch0, scratch1, m_, DA_c_, alpha_, beta_, kappa_, gamma_)
 }
 public func bg_learn(
     stream: ComputeStream,
@@ -58,6 +59,7 @@ public final class BasalGangliaPrime{
     var d_w: GPUBuffer<Float>
     var scratch0: GPUBuffer<Float>
     var scratch1: GPUBuffer<Float>
+    var ST: GPUBuffer<Float>
     var M: GPUBuffer<Float>
     //params
     var m: UInt32
@@ -102,6 +104,7 @@ public final class BasalGangliaPrime{
         self.s0=GPUBuffer<Float>(device: device, capacity: Int(m))
         self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(m))
         self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.ST=GPUBuffer<Float>(device: device, capacity: 1)
         self.M=GPUBuffer<Float>(device: device, capacity: 1)
         self.eta0=eta0
         self.eta_max=eta_max
@@ -123,6 +126,7 @@ public final class BasalGangliaPrime{
             M,
             scratch0,
             scratch1,
+            ST,
             m,
             n,
             k,
@@ -152,6 +156,7 @@ public final class BasalGangliaPrime{
             n,
             k
         )
+        stream.advance()
     }
 }
 public func bg_setup() -> BasalGangliaPrime{
@@ -180,7 +185,7 @@ public func bg_setup() -> BasalGangliaPrime{
         eta0: 1e-5,
         eta_max: 5e-5,
         w_max: wwscale,
-        gamma: 0.0
+        gamma: 1.00
     )
     return bg
 }

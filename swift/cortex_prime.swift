@@ -47,6 +47,7 @@ public func cortex_step(
     _ ACh_c: Float,
     _ DA_c: Float,
     _ w2_ACh_: Float,
+    _ w3_ACh_: Float,
     _ w2_NE_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
@@ -74,6 +75,7 @@ public func cortex_step(
     let leak=leak_
     var g0=1.0+w2_NE_*NE_c
     var g1=1.0-w2_ACh_*ACh_c
+    var g2=1.0-w3_ACh_*ACh_c
     stream.dispatch(
         kernel: "cortex_step",
         args: [
@@ -90,7 +92,8 @@ public func cortex_step(
             bytes(&inhib_alpha),
             bytes(&alpha_gamma),
             bytes(&g0),
-            bytes(&g1)
+            bytes(&g1),
+            bytes(&g2)
         ],
         grid: MTLSize(
             width: (Int(k)+255)/256,
@@ -216,6 +219,7 @@ public final class CortexPrime{
     var leak: Float
     var w2_NE: Float
     var w2_ACh: Float
+    var w3_ACh: Float
     init(device: MTLDevice, 
         stream: ComputeStream, 
         n: UInt32, 
@@ -240,6 +244,7 @@ public final class CortexPrime{
         w_DA: Float,
         w2_NE: Float,
         w2_ACh: Float,
+        w3_ACh: Float,
         dt: Float,
         alpha_gamma: Float,
         leak: Float){
@@ -306,6 +311,7 @@ public final class CortexPrime{
         self.leak=leak
         self.w2_NE=w2_NE
         self.w2_ACh=w2_ACh
+        self.w3_ACh=w3_ACh
     }
     func step(
         E_t: GPUBuffer<Float>,
@@ -359,6 +365,7 @@ public final class CortexPrime{
             ACh_c,
             DA_c,
             w2_ACh,
+            w3_ACh,
             w2_NE,
             n,
             k,
@@ -506,10 +513,11 @@ public func cortex_setup() -> CortexPrime{
         w_ACh: 0.6,
         w_DA: 2.0,
         w2_NE: 0.03,
-        w2_ACh: 0.35,
+        w2_ACh: 0.7,
+        w3_ACh: 0.3,
         dt: 0.02,
         alpha_gamma: 0.15,
-        leak: 0.01
+        leak: 0.005
     )
     stream.advance()
     stream.synchronize()

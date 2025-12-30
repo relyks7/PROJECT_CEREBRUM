@@ -15,7 +15,7 @@ kernel void variance_simd_reduce(
     uint sj [[simdgroup_index_in_threadgroup]]
 ) {
     if (j.y>=b) return;
-    float val=(j.x<n)?(A[j.y*n+j.x]-mu[j.y])*(A[j.y*n+j.x]-mu[j.y]):0.0f;
+    float val=(j.x<n)?(A[j.y*n+j.x]-mu[j.y])*(A[j.y*n+j.x]-mu[j.y])/n:0.0f;
     float local_sum=simd_sum(val);
     threadgroup float ps[WARPS];
     if (si==0){
