@@ -75,6 +75,43 @@ public func add_scaled(
         )
     )
 }
+public func add3(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ C: GPUBuffer <Float>,
+    _ D: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    precondition(D.count == Int(n_*b_), "D has wrong size")
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "add3",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            .buffer(D.buffer),
+            bytes(&n),
+            bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
 public func add4(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -690,6 +727,40 @@ public func relu(
             .buffer(B.buffer),
             bytes(&n),
             bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func relu_s(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ theta_: Float
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    var theta=theta_
+    stream.dispatch(
+        kernel: "relu_s",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&theta)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1433,7 +1504,8 @@ public func final_oja_step(
     _ A_new: GPUBuffer <Float>,
     _ n_: UInt32,
     _ r_: UInt32,
-    _ lambda_: Float
+    _ lambda_: Float,
+    _ DA_c_: Float
 ){
     precondition(G1.count == Int(n_*r_), "G1 has wrong size")
     precondition(G2.count == Int(n_*r_), "G2 has wrong size")
@@ -1443,6 +1515,7 @@ public func final_oja_step(
     var n=n_
     var r=r_
     var lambda=lambda_
+    var DA_c=DA_c_
     stream.dispatch(
         kernel: "final_oja_step",
         args: [
@@ -1453,7 +1526,8 @@ public func final_oja_step(
             .buffer(A_new.buffer),
             bytes(&n),
             bytes(&r),
-            bytes(&lambda)
+            bytes(&lambda),
+            bytes(&DA_c)
         ],
         grid: MTLSize(
             width: (Int(r) + 255) / 256,
@@ -1478,7 +1552,8 @@ public func get_eta(
     _ w_ACh_: Float,
     _ w_DA_: Float,
     _ b_: Float,
-    _ eta_max_: Float
+    _ eta_max_: Float,
+    _ DA_c_: Float
 ){
     precondition(NE.count == Int(n_), "NE has wrong size")
     precondition(ACh.count == Int(n_), "ACh has wrong size")
@@ -1490,6 +1565,7 @@ public func get_eta(
     var w_DA=w_DA_
     var b=b_
     var eta_max=eta_max_
+    var DA_c=DA_c_
     stream.dispatch(
         kernel: "get_eta",
         args: [
@@ -1502,7 +1578,8 @@ public func get_eta(
             bytes(&w_ACh),
             bytes(&w_DA),
             bytes(&b),
-            bytes(&eta_max)
+            bytes(&eta_max),
+            bytes(&DA_c)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1569,7 +1646,9 @@ public func bg_forward(
     _ alpha_: Float,
     _ beta_: Float,
     _ kappa_: Float,
-    _ gamma_: Float
+    _ gamma_: Float,
+    _ k_low_: Float,
+    _ k_high_: Float
 ){
     precondition(S.count == Int(n_), "S has wrong size")
     precondition(G.count == Int(n_), "G has wrong size")
@@ -1579,6 +1658,8 @@ public func bg_forward(
     var beta=beta_
     var kappa=kappa_
     var gamma=gamma_
+    var k_low=k_low_
+    var k_high=k_high_
     stream.dispatch(
         kernel: "bg_step",
         args: [
@@ -1611,7 +1692,10 @@ public func bg_forward(
             .buffer(M.buffer),
             .buffer(ST.buffer),
             bytes(&n),
-            bytes(&gamma)
+            bytes(&gamma),
+            bytes(&DA_c),
+            bytes(&k_low),
+            bytes(&k_high)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1649,6 +1733,38 @@ public func bg_oja(
             bytes(&b),
             bytes(&eta),
             bytes(&w_max)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func get_alpha(
+    stream: ComputeStream,
+    E_t: GPUBuffer<Float>,
+    scratch0: GPUBuffer<Float>,
+    scratch1: GPUBuffer<Float>,
+    E_tm: GPUBuffer<Float>,
+    c_: Float,
+    n_: Float
+){
+    precondition(E_t.count==Int(n_), "E_t has wrong size")
+    var n=n_
+    var c=c_
+    abs_mean_simd(stream: stream, E_t, scratch0, scratch1, E_tm, n_, 1)
+    stream.dispatch(
+        kernel: "get_alpha",
+        args: [
+            .buffer(E_tm.buffer),
+            bytes(&c),
+            bytes(&alpha)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,

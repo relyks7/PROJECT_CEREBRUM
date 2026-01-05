@@ -20,11 +20,13 @@ public func bg_step(
     _ alpha_: Float,
     _ beta_: Float,
     _ kappa_: Float,
-    _ gamma_: Float
+    _ gamma_: Float,
+    _ k_low: Float,
+    _ k_high: Float
 ){
     gemv(stream: stream, W_str, H_t0, s0, m_, n_*k_)
     add(stream: stream, s0, b_str, s, m_, 1)
-    bg_forward(stream: stream, s, g, M, ST, scratch0, scratch1, m_, DA_c_, alpha_, beta_, kappa_, gamma_)
+    bg_forward(stream: stream, s, g, M, ST, scratch0, scratch1, m_, DA_c_, alpha_, beta_, kappa_, gamma_, k_low, k_high)
 }
 public func bg_learn(
     stream: ComputeStream,
@@ -69,6 +71,8 @@ public final class BasalGangliaPrime{
     var beta: Float
     var kappa: Float
     var gamma: Float
+    var k_low: Float
+    var k_high: Float
     var eta0: Float
     var eta_max: Float
     var w_max: Float
@@ -86,7 +90,9 @@ public final class BasalGangliaPrime{
         eta0: Float,
         eta_max: Float,
         w_max: Float,
-        gamma: Float
+        gamma: Float,
+        k_low: Float,
+        k_high: Float
     ){
         self.device = device
         self.stream = stream
@@ -110,6 +116,8 @@ public final class BasalGangliaPrime{
         self.eta_max=eta_max
         self.w_max=w_max
         self.gamma=gamma
+        self.k_low=k_low
+        self.k_high=k_high
     }
     func step(
         H_t0: GPUBuffer<Float>,
@@ -134,7 +142,9 @@ public final class BasalGangliaPrime{
             alpha,
             beta,
             kappa,
-            gamma
+            gamma,
+            k_low,
+            k_high
         )
         stream.advance()
     }
@@ -179,13 +189,15 @@ public func bg_setup() -> BasalGangliaPrime{
         m: m,
         n: n, 
         k: k,
-        alpha:1.0,
-        beta:1.0,
+        alpha:2.0,
+        beta:2.0,
         kappa:8.0,
         eta0: 1e-5,
         eta_max: 5e-5,
         w_max: wwscale,
-        gamma: 1.00
+        gamma: 3.0,
+        k_low: 0.8,
+        k_high: 1.6
     )
     return bg
 }

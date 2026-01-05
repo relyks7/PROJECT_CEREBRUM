@@ -11,10 +11,11 @@ kernel void get_eta(
     constant float& w_DA [[buffer(7)]],
     constant float& b [[buffer(8)]],
     constant float& eta_max [[buffer(9)]],
+    constant float& DA_c [[buffer(10)]],
     uint i[[thread_position_in_grid]]
 ){
     if (i<n){
         float z=max(0.0, w_NE*NE[i]-w_ACh*ACh[i]+w_DA*DA[i]+b);
-        eta[i]=eta_max * z * rsqrt(1.0f + z*z);
+        eta[i]=eta_max * z * rsqrt(1.0f + z*z)*DA_c;
     }
 }

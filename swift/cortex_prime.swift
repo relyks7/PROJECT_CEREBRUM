@@ -4,6 +4,8 @@ import Darwin
 public func cortex_step(
     stream: ComputeStream,
     _ E_t: GPUBuffer <Float>,
+    _ elig: GPUBuffer <Float>,
+    _ l2_: Float, 
     _ H_t0: GPUBuffer <Float>,
     _ H_t0_t: GPUBuffer <Float>,
     _ H_scratch: GPUBuffer <Float>,
@@ -11,6 +13,10 @@ public func cortex_step(
     _ B: GPUBuffer <Float>,
     _ B_t: GPUBuffer <Float>,
     _ X_g0: GPUBuffer <Float>,
+    _ X_g1: GPUBuffer <Float>,
+    _ scratch0: GPUBuffer <Float>,
+    _ scratch1: GPUBuffer <Float>,
+    _ M: GPUBuffer <Float>,
     _ X_g: GPUBuffer <Float>,
     _ X_m3_t: GPUBuffer <Float>,
     _ X_m5_t: GPUBuffer <Float>,
@@ -44,10 +50,9 @@ public func cortex_step(
     _ dt: Float,
     _ leak_: Float,
     _ NE_c: Float,
-    _ ACh_c: Float,
+    _ ACh_c_: Float,
     _ DA_c: Float,
-    _ w2_ACh_: Float,
-    _ w3_ACh_: Float,
+    _ gw_DA: Float,
     _ w2_NE_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
@@ -73,9 +78,11 @@ public func cortex_step(
     var inhib_alpha=inhib_alpha_
     var alpha_gamma=alpha_gamma_
     let leak=leak_
-    var g0=1.0+w2_NE_*NE_c
-    var g1=1.0-w2_ACh_*ACh_c
-    var g2=1.0-w3_ACh_*ACh_c
+    var ACh_c=ACh_c_
+    let l2=l2_
+    var g_DA=gw_DA*DA_c
+    add3(stream: stream, X_g, X_m, E_t, X_g1, n_*k_, 1)
+    abs_mean_simd(stream: stream, X_g1, scratch0, scratch1, M, n_*k_, 1)
     stream.dispatch(
         kernel: "cortex_step",
         args: [
@@ -86,14 +93,14 @@ public func cortex_step(
             .buffer(mu.buffer),
             .buffer(gamma.buffer),
             .buffer(beta.buffer),
+            .buffer(M.buffer),
             bytes(&n),
             bytes(&k),
             bytes(&softlog_alpha),
             bytes(&inhib_alpha),
             bytes(&alpha_gamma),
-            bytes(&g0),
-            bytes(&g1),
-            bytes(&g2)
+            bytes(&ACh_c),
+            bytes(&g_DA)
         ],
         grid: MTLSize(
             width: (Int(k)+255)/256,
@@ -108,6 +115,7 @@ public func cortex_step(
     )
     axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt * (1.0 + w2_NE_ * NE_c), leak * exp(-DA_c))
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
+    axbpy(stream: stream, elig, H_t0, elig, n_*k_, 1, 1.0-l2, 0)
 }
 //NB: ASSUME B_t IS ALREADY SET (given that B is constant)
 public func oja(
@@ -129,7 +137,8 @@ public func oja(
     _ r_: UInt32,
     _ n_: UInt32,
     _ k_: UInt32,
-    _ lambda_: Float
+    _ lambda_: Float,
+    _ DA_c_: Float
 ){
     transpose(stream: stream, Y, Y_t, k_, n_)
     gemm(stream: stream, Y_t, B, T1, k_, n_, r_, 1)
@@ -138,7 +147,7 @@ public func oja(
     gemm(stream: stream, T2, S, U, k_, r_, r_, 1)
     gemm(stream: stream, X, T1, G, n_, k_, r_, 1)
     gemm(stream: stream, Y, U, H, n_, k_, r_, 1)
-    final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_)
+    final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_, DA_c_)
     copy(stream: stream, A_new, A, n_*r_, 1)
 }
 public final class CortexPrime{
@@ -148,7 +157,7 @@ public final class CortexPrime{
     //main
     var H_t0: GPUBuffer <Float>
     var H_t1: GPUBuffer <Float>
-
+    var elig: GPUBuffer <Float>
     var A: GPUBuffer <Float>
     var A_new: GPUBuffer<Float>
 
@@ -166,6 +175,10 @@ public final class CortexPrime{
     var H_t0_t: GPUBuffer<Float>
     var H_scratch: GPUBuffer<Float>
     var X_g0: GPUBuffer <Float>
+    var X_g1: GPUBuffer <Float>
+    var scratch0: GPUBuffer <Float>
+    var scratch1: GPUBuffer <Float>
+    var M: GPUBuffer <Float>
     var X_m3_t: GPUBuffer <Float>
     var X_m5_t: GPUBuffer <Float>
     var X_m7_t: GPUBuffer <Float>
@@ -196,6 +209,7 @@ public final class CortexPrime{
     let w_NE: Float
     let w_ACh: Float
     let w_DA: Float
+    let lambda: Float
 
     var W_conv_r3: GPUBuffer <Float>
     var W_conv_r5: GPUBuffer <Float>
@@ -212,14 +226,13 @@ public final class CortexPrime{
     var softlog_alpha: Float
     var inhib_alpha: Float
     var alpha_gamma: Float
-    var lambda: Float
+    var l2: Float
+    var gw_DA: Float
     var eta_max: Float
     var mes_alpha: Float
     var dt: Float
     var leak: Float
     var w2_NE: Float
-    var w2_ACh: Float
-    var w3_ACh: Float
     init(device: MTLDevice, 
         stream: ComputeStream, 
         n: UInt32, 
@@ -237,17 +250,17 @@ public final class CortexPrime{
         mes_alpha: Float,
         inhib_alpha: Float,
         lambda: Float,
+        l2: Float,
         eta_max: Float,
         oja_bias: Float,
         w_NE: Float, 
         w_ACh: Float, 
         w_DA: Float,
         w2_NE: Float,
-        w2_ACh: Float,
-        w3_ACh: Float,
         dt: Float,
         alpha_gamma: Float,
-        leak: Float){
+        leak: Float,
+        gw_DA: Float){
         self.n=n
         self.k=k
         self.r=r
@@ -256,6 +269,7 @@ public final class CortexPrime{
         self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_scratch=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_t1=GPUBuffer(device: device, capacity: Int(n*k))
+        self.elig=GPUBuffer(device: device, capacity: Int(n*k))
         self.A=GPUBuffer(device: device, capacity: Int(n*r))
         self.A_new=GPUBuffer(device: device, capacity: Int(n*r))
         self.B=GPUBuffer(device: device, capacity: Int(n*r))
@@ -270,6 +284,10 @@ public final class CortexPrime{
         self.H_t0_t=GPUBuffer(device: device, capacity: Int(k*n))
         self.H_t1_t=GPUBuffer(device: device, capacity: Int(k*n))
         self.X_g0=GPUBuffer(device: device, capacity: Int(r*k))
+        self.X_g1=GPUBuffer(device: device, capacity: Int(n*k))
+        self.scratch0=GPUBuffer(device: device, capacity: Int(n*k))
+        self.scratch1=GPUBuffer(device: device, capacity: Int(n*k))
+        self.M=GPUBuffer(device: device, capacity: 1)
         self.X_m3_t=GPUBuffer(device: device, capacity: Int(k*n))
         self.X_m5_t=GPUBuffer(device: device, capacity: Int(k*n))
         self.X_m7_t=GPUBuffer(device: device, capacity: Int(k*n))
@@ -299,6 +317,7 @@ public final class CortexPrime{
         self.beta=beta
         self.softlog_alpha=softlog_alpha
         self.inhib_alpha=inhib_alpha
+        self.l2=l2
         self.lambda=lambda
         self.eta_max=eta_max
         self.oja_bias=oja_bias
@@ -310,8 +329,7 @@ public final class CortexPrime{
         self.alpha_gamma=alpha_gamma
         self.leak=leak
         self.w2_NE=w2_NE
-        self.w2_ACh=w2_ACh
-        self.w3_ACh=w3_ACh
+        self.gw_DA=gw_DA
     }
     func step(
         E_t: GPUBuffer<Float>,
@@ -322,6 +340,8 @@ public final class CortexPrime{
         cortex_step(
             stream: stream,
             E_t,
+            elig,
+            l2,
             H_t0,
             H_t0_t,
             H_scratch,
@@ -329,6 +349,10 @@ public final class CortexPrime{
             B, 
             B_t,
             X_g0,
+            X_g1,
+            scratch0,
+            scratch1,
+            M,
             X_g,
             X_m3_t,
             X_m5_t,
@@ -364,8 +388,7 @@ public final class CortexPrime{
             NE_c,
             ACh_c,
             DA_c,
-            w2_ACh,
-            w3_ACh,
+            gw_DA,
             w2_NE,
             n,
             k,
@@ -377,7 +400,8 @@ public final class CortexPrime{
     func learn(
         NE: GPUBuffer <Float>,
         ACh: GPUBuffer <Float>,
-        DA: GPUBuffer <Float>
+        DA: GPUBuffer <Float>,
+        DA_c: Float
     ){
         get_eta(
             stream: stream,
@@ -390,7 +414,8 @@ public final class CortexPrime{
             w_ACh,
             w_DA,
             oja_bias,
-            eta_max
+            eta_max,
+            DA_c
         )
         oja(
             stream: stream,
@@ -405,13 +430,14 @@ public final class CortexPrime{
             U,
             G,
             H,
-            H_t0,
+            elig,
             H_t1,
             H_t1_t,
             r,
             n,
             k,
-            lambda
+            lambda,
+            DA_c
         )
         stream.advance()
     }
@@ -507,17 +533,17 @@ public func cortex_setup() -> CortexPrime{
         mes_alpha: 0.12,
         inhib_alpha: 0.9,
         lambda: 2e-5,
+        l2: 0.97,
         eta_max: 1e-4,
         oja_bias: 0.0,
         w_NE: 0.3,
         w_ACh: 0.6,
         w_DA: 2.0,
         w2_NE: 0.03,
-        w2_ACh: 0.7,
-        w3_ACh: 0.3,
         dt: 0.02,
         alpha_gamma: 0.15,
-        leak: 0.005
+        leak: 0.005,
+        gw_DA: 1.0
     )
     stream.advance()
     stream.synchronize()

@@ -9,10 +9,12 @@ kernel void final_oja_step(
     constant uint& n[[buffer(5)]],
     constant uint& r[[buffer(6)]],
     constant float& lambda[[buffer(7)]],
+    constant float& DA_c[[buffer(8)]],
     uint2 i[[thread_position_in_grid]]
 ){
     if (i.x<r && i.y<n){
         uint idx=i.y*r+i.x;
-        A_new[idx]=(A[idx]+(eta[i.y]*(G1[idx] - G2[idx])))*(1-lambda);
+        float A_d=(eta[i.y]*(G1[idx] - G2[idx]))-lambda*A[idx];
+        A_new[idx]=A[idx]+DA_c*A_d;
     }
 }

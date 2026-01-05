@@ -12,10 +12,11 @@ kernel void bg_step(
 ){
     if (idx<n){
         float da = clamp(DA_c, 0.0f, 1.0f);
-        float go=S[idx]+alpha*da;
-        float ngo=S[idx]-beta*da;
-        go  = 1/(1+exp(-go));
-        ngo = 1/(1+exp(-ngo));
+        float gain1 = 1.0f + alpha * da;
+        float gain2 = 1.0f + beta * da;
+
+        float go  = 1.0f / (1.0f + exp(-gain1 * S[idx]));
+        float ngo = 1.0f / (1.0f + exp( gain2 * S[idx]));
         float U=(go-ngo)*kappa;
         G[idx]=U;
     }

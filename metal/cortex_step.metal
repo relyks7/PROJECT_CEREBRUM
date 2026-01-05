@@ -8,26 +8,26 @@ kernel void cortex_step(
     device const float* mu[[buffer(4)]],
     device const float* gamma[[buffer(5)]],
     device const float* beta[[buffer(6)]],
-    constant uint& n[[buffer(7)]],
-    constant uint& k[[buffer(8)]],
-    constant float& softlog_alpha[[buffer(9)]],
-    constant float& inhib_alpha[[buffer(10)]],
-    constant float& gamma0 [[buffer(11)]],
-    constant float& g0 [[buffer(12)]],
-    constant float& g1 [[buffer(13)]],
-    constant float& g2 [[buffer(14)]],
+    device const float* M[[buffer(7)]],
+    constant uint& n[[buffer(8)]],
+    constant uint& k[[buffer(9)]],
+    constant float& softlog_alpha[[buffer(10)]],
+    constant float& inhib_alpha[[buffer(11)]],
+    constant float& gamma0 [[buffer(12)]],
+    constant float& ACh_c [[buffer(13)]],
+    constant float& g_DA [[buffer(14)]],
     uint2 i[[thread_position_in_grid]]
 ){
     if (i.x < k && i.y < n) {
         uint idx = i.y * k + i.x;
 
-        float X  = g0*(g1*(X_g[idx] + X_m[idx])+g2*E_t[idx]);
+        float X  = (1-ACh_c)*(X_g[idx] + X_m[idx])+E_t[idx];
         float aX = fabs(X);
 
         float softlog_val = X * log(1.0f + softlog_alpha * aX) / (aX + 1e-6f);
 
-        float div = max(gamma0 + beta[i.y] * gamma[i.y], 1e-3f);
-        float sub = inhib_alpha * mu[i.y];
+        float div = max(gamma0*(1+g_DA) + (1.0f + ACh_c)*beta[i.y] * gamma[i.y], 1e-3f);
+        float sub = inhib_alpha * mu[i.y] * (1 + g_DA);
 
         H_t1[idx] = (softlog_val - sub) / div;
     }
