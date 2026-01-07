@@ -1754,27 +1754,14 @@ public func get_alpha(
     E_tm: GPUBuffer<Float>,
     c_: Float,
     n_: Float
-){
+) -> Float{
     precondition(E_t.count==Int(n_), "E_t has wrong size")
     var n=n_
     var c=c_
     abs_mean_simd(stream: stream, E_t, scratch0, scratch1, E_tm, n_, 1)
-    stream.dispatch(
-        kernel: "get_alpha",
-        args: [
-            .buffer(E_tm.buffer),
-            bytes(&c),
-            bytes(&alpha)
-        ],
-        grid: MTLSize(
-            width: (Int(n) + 255) / 256,
-            height: 1,
-            depth: 1
-        ),
-        threads: MTLSize(
-            width: 256,
-            height: 1,
-            depth: 1
-        )
-    )
+    stream.advance()
+    stream.synchronize()
+    var nv=E_tm.ptr()[0]
+    nv=nv/(nv+c)
+    return nv
 }

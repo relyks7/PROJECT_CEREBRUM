@@ -6,6 +6,7 @@ let k: UInt32 = 128
 let r: UInt32 = 256
 let m: UInt32 = 64
 let Ds: UInt32 = 128
+let hr: UInt32 = 256
 let context=MetalContext(kernelsDirectory: URL(fileURLWithPath: "../kernels"))
 let device=context.device
 let stream = ComputeStream(context: context)
@@ -19,6 +20,7 @@ public final class Cerebrum{
     let Cortex: CortexPrime
     let Thalamus: ThalamusPrime
     let BasalGanglia: BasalGangliaPrime
+    let Hippocampus: HippocampusPrime
     init(){
         self.NE=GPUBuffer(device: device, capacity: Int(n))
         self.ACh=GPUBuffer(device: device, capacity: Int(n))
@@ -29,8 +31,10 @@ public final class Cerebrum{
         self.Cortex=cortex_setup()
         self.Thalamus=thalamus_setup()
         self.BasalGanglia=bg_setup()
+        self.Hippocampus=hippocampus_setup()
         self.Cortex.zero_state()
         self.Thalamus.zero_state()
+        self.Hippocampus.zero_state()
     }
     func chem_decay() {
         chem_decay_0(stream: stream, ACh, DA, NE, n, d_ACh, d_DA, d_NE)
@@ -59,6 +63,12 @@ public final class Cerebrum{
             ACh_c: Thalamus.ACh_c,
             DA_c: Thalamus.DA_c
         )
+        Hippocampus.step(
+            H_t: Cortex.H_t0,
+            DA_c: Thalamus.DA_c,
+            ACh_c: Thalamus.ACh_c,
+            NE_c: Thalamus.NE_c
+        )
     }
     func cortex_learn(){
         Thalamus.chem_mean(
@@ -83,6 +93,29 @@ public final class Cerebrum{
             H_t0: Cortex.H_t0,
             DA_c: Thalamus.DA_c
         )
+    }
+    func recall_step(
+        steps: UInt32
+    ){
+        Thalamus.chem_mean(
+            NE: NE,
+            ACh: ACh,
+            DA: DA
+        )
+        for i in 0..<steps {
+            Hippocampus.step(
+                H_t: Cortex.H_t0,
+                DA_c: Thalamus.DA_c,
+                ACh_c: 1.0,
+                NE_c: 0.1
+            )
+            Cortex.learn(
+                NE: NE,
+                ACh: ACh,
+                DA: DA,
+                DA_c: Thalamus.DA_c
+            )
+        }
     }
 }
 //Sextus est discipulus malus!
