@@ -84,7 +84,7 @@ public final class HippocampusPrime{
         self.P=P
         self.Q=Q
         self.B=B
-        self.HC_p=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
+        self.HC_p=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.HC_prev=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
         self.H_p=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
         self.n=n
@@ -148,7 +148,7 @@ public func hippocampus_setup() -> HippocampusPrime{
     for i in 0..<hr {
         for j in 0..<k {
             let noise = Float.random(in: -noiseScale...noiseScale)
-            Q.ptr()[i*k+j] = P.ptr()[j*hr+i] + noise
+            Q.ptr()[Int(i*k+j)] = P.ptr()[Int(j*hr+i)] + noise
         }
     }
     stream.advance()

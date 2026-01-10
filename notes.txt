@@ -1,0 +1,4 @@
+issue 1: the agent does nothing meaningful
+solution: get the agent to predict the next U_t
+issue 2: neuromodulators has no purpose
+solution: let them be statistics.

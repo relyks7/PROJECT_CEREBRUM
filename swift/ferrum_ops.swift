@@ -1120,6 +1120,85 @@ public func mean_simd(
         curN = nextN
     }
 }
+public func sqmean_simd(
+    stream: ComputeStream,
+    _ A: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
+    _ B: GPUBuffer<Float>,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    let batch = Int(b_)
+    var cur = A
+    var curN = Int(n_)
+    var toggle=false
+    var isfirst=true
+    while curN > 1 {
+        let nextN = (curN + 127) / 128
+        let out: GPUBuffer<Float>
+        if nextN == 1{
+            out=B
+        } else{
+            if toggle{
+                out=scratch0
+            }else{
+                out=scratch1
+            }
+            toggle.toggle()
+        }
+        var n = UInt32(curN)
+        var b = b_
+        if isfirst{
+            stream.dispatch(
+                kernel: "sqmean_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+            isfirst=false
+        }
+        else{
+            stream.dispatch(
+                kernel: "sum_simd_reduce",
+                args: [
+                    .buffer(cur.buffer),
+                    .buffer(out.buffer),
+                    bytes(&n),
+                    bytes(&b)
+                ],
+                grid: MTLSize(
+                    width: nextN,
+                    height: batch,
+                    depth: 1
+                ),
+                threads: MTLSize(
+                    width: 128,
+                    height: 1,
+                    depth: 1
+                )
+            )
+        }
+        if nextN == 1 { return }
+        cur = out
+        curN = nextN
+    }
+}
 public func variance_simd(
     stream: ComputeStream,
     _ A: GPUBuffer<Float>,
@@ -1543,43 +1622,35 @@ public func final_oja_step(
 }
 public func get_eta(
     stream: ComputeStream,
-    _ NE: GPUBuffer <Float>,
-    _ ACh: GPUBuffer <Float>,
-    _ DA: GPUBuffer <Float>,
     _ eta: GPUBuffer <Float>,
+    _ elig: GPUBuffer <Float>,
+    _ eligmean: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer <Float>,
+    _ scratch1: GPUBuffer <Float>,
     _ n_: UInt32,
-    _ w_NE_: Float,
-    _ w_ACh_: Float,
-    _ w_DA_: Float,
-    _ b_: Float,
+    _ k_:UInt32,
     _ eta_max_: Float,
+    _ alpha_: Float,
     _ DA_c_: Float
 ){
-    precondition(NE.count == Int(n_), "NE has wrong size")
-    precondition(ACh.count == Int(n_), "ACh has wrong size")
-    precondition(DA.count == Int(n_), "DA has wrong size")
-    precondition(eta.count == Int(n_), "eta has wrong size")
+    precondition(eta.count == Int(n_), "NE has wrong size")
+    precondition(eligmean.count==Int(n_), "eligmean has wrong size")
+    precondition(elig.count == Int(n_*k_), "elig has wrong size")
     var n=n_
-    var w_NE=w_NE_
-    var w_ACh=w_ACh_
-    var w_DA=w_DA_
-    var b=b_
+    var k=k_
     var eta_max=eta_max_
+    var alpha=alpha_
     var DA_c=DA_c_
+    abs_mean_simd(stream: stream, elig, scratch0, scratch1, eligmean, n_, k_)
     stream.dispatch(
         kernel: "get_eta",
         args: [
-            .buffer(NE.buffer),
-            .buffer(ACh.buffer),
-            .buffer(DA.buffer),
+            .buffer(eligmean.buffer),
             .buffer(eta.buffer),
+            bytes(&eta_max)
             bytes(&n),
-            bytes(&w_NE),
-            bytes(&w_ACh),
-            bytes(&w_DA),
-            bytes(&b),
-            bytes(&eta_max),
-            bytes(&DA_c)
+            bytes(&DA_c),
+            bytes(&alpha)
         ],
         grid: MTLSize(
             width: (Int(n) + 255) / 256,
@@ -1753,15 +1824,13 @@ public func get_alpha(
     scratch1: GPUBuffer<Float>,
     E_tm: GPUBuffer<Float>,
     c_: Float,
-    n_: Float
+    n_: UInt32
 ) -> Float{
     precondition(E_t.count==Int(n_), "E_t has wrong size")
-    var n=n_
-    var c=c_
     abs_mean_simd(stream: stream, E_t, scratch0, scratch1, E_tm, n_, 1)
     stream.advance()
     stream.synchronize()
     var nv=E_tm.ptr()[0]
-    nv=nv/(nv+c)
+    nv=nv/(nv+c_)
     return nv
 }

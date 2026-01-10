@@ -11,6 +11,8 @@ public func cortex_step(
     _ H_scratch: GPUBuffer <Float>,
     _ A: GPUBuffer <Float>,
     _ B: GPUBuffer <Float>,
+    _ W_pred: GPUBuffer <Float>,
+    _ U_t1: GPUBuffer<Float>,
     _ B_t: GPUBuffer <Float>,
     _ X_g0: GPUBuffer <Float>,
     _ X_g1: GPUBuffer <Float>,
@@ -56,7 +58,8 @@ public func cortex_step(
     _ w2_NE_: Float,
     _ n_: UInt32,
     _ k_: UInt32,
-    _ r_: UInt32
+    _ r_: UInt32,
+    _ Ds_: UInt32
 ){
     gemm(stream: stream, B_t, H_t0, X_g0, r_, n_, k_, 1);
     gemm(stream: stream, A, X_g0, X_g, n_, r_, k_, 1);
@@ -116,6 +119,7 @@ public func cortex_step(
     axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt * (1.0 + w2_NE_ * NE_c), leak * exp(-DA_c))
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
     axbpy(stream: stream, elig, H_t0, elig, n_*k_, 1, 1.0-l2, 0)
+    gemv(stream:stream, W_pred, H_t0, U_t1, Ds_, n_*k_)
 }
 //NB: ASSUME B_t IS ALREADY SET (given that B is constant)
 public func oja(
@@ -158,6 +162,7 @@ public final class CortexPrime{
     var H_t0: GPUBuffer <Float>
     var H_t1: GPUBuffer <Float>
     var elig: GPUBuffer <Float>
+    var eligmean: GPUBuffer <Float>
     var A: GPUBuffer <Float>
     var A_new: GPUBuffer<Float>
 
@@ -205,12 +210,10 @@ public final class CortexPrime{
     let n: UInt32
     let k: UInt32
     let r: UInt32
-
-    let w_NE: Float
-    let w_ACh: Float
-    let w_DA: Float
+    let Ds: UInt32
     let lambda: Float
-
+    var W_pred: GPUBuffer <Float>
+    var U_t1: GPUBuffer <Float>
     var W_conv_r3: GPUBuffer <Float>
     var W_conv_r5: GPUBuffer <Float>
     var W_conv_r7: GPUBuffer <Float>
@@ -238,7 +241,9 @@ public final class CortexPrime{
         n: UInt32, 
         k: UInt32, 
         r: UInt32,
+        Ds: UInt32,
         B: GPUBuffer<Float>,
+        W_pred: GPUBuffer<Float>,
         W_conv_r3: GPUBuffer<Float>,
         W_conv_r5: GPUBuffer<Float>,
         W_conv_r7: GPUBuffer<Float>,
@@ -253,23 +258,23 @@ public final class CortexPrime{
         l2: Float,
         eta_max: Float,
         oja_bias: Float,
-        w_NE: Float, 
-        w_ACh: Float, 
-        w_DA: Float,
         w2_NE: Float,
         dt: Float,
         alpha_gamma: Float,
         leak: Float,
-        gw_DA: Float){
+        gw_DA: Float,
+        alpha_eta: Float){
         self.n=n
         self.k=k
         self.r=r
+        self.Ds=Ds
         self.device=device
         self.stream=stream
         self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_scratch=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_t1=GPUBuffer(device: device, capacity: Int(n*k))
         self.elig=GPUBuffer(device: device, capacity: Int(n*k))
+        self.eligmean=GPUBuffer(device: device, capacity: Int(n))
         self.A=GPUBuffer(device: device, capacity: Int(n*r))
         self.A_new=GPUBuffer(device: device, capacity: Int(n*r))
         self.B=GPUBuffer(device: device, capacity: Int(n*r))
@@ -308,6 +313,8 @@ public final class CortexPrime{
         self.U=GPUBuffer(device: device, capacity: Int(k*r))
         self.G=GPUBuffer(device: device, capacity: Int(n*r))
         self.H=GPUBuffer(device: device, capacity: Int(n*r))
+        self.U_t1=GPUBuffer(device: device, capacity: Int(Ds))
+        self.W_pred=W_pred
         self.W_conv_r3=W_conv_r3
         self.W_conv_r5=W_conv_r5
         self.W_conv_r7=W_conv_r7
@@ -321,21 +328,20 @@ public final class CortexPrime{
         self.lambda=lambda
         self.eta_max=eta_max
         self.oja_bias=oja_bias
-        self.w_NE=w_NE
-        self.w_ACh=w_ACh
-        self.w_DA=w_DA
         self.mes_alpha=mes_alpha
         self.dt=dt
         self.alpha_gamma=alpha_gamma
         self.leak=leak
         self.w2_NE=w2_NE
         self.gw_DA=gw_DA
+        self.alpha_eta=alpha_eta
+        
     }
     func step(
         E_t: GPUBuffer<Float>,
         NE_c: Float,
         ACh_c: Float,
-        DA_c: Float
+        DA_c: Float,
     ){
         cortex_step(
             stream: stream,
@@ -347,6 +353,8 @@ public final class CortexPrime{
             H_scratch,
             A,
             B, 
+            W_pred,
+            U_t1,
             B_t,
             X_g0,
             X_g1,
@@ -392,29 +400,26 @@ public final class CortexPrime{
             w2_NE,
             n,
             k,
-            r
+            r,
+            Ds
         )
         
         stream.advance()
     }
     func learn(
-        NE: GPUBuffer <Float>,
-        ACh: GPUBuffer <Float>,
-        DA: GPUBuffer <Float>,
         DA_c: Float
     ){
         get_eta(
             stream: stream,
-            NE,
-            ACh,
-            DA,
             eta,
+            elig,
+            eligmean,
+            scratch0,
+            scratch1,
             n,
-            w_NE,
-            w_ACh,
-            w_DA,
-            oja_bias,
+            k,
             eta_max,
+            alpha_eta,
             DA_c
         )
         oja(
@@ -446,32 +451,33 @@ public final class CortexPrime{
         zero(stream: stream, self.H_t1, n*k, 1)
         zero(stream: stream, mu, n, 1)
         zero(stream: stream, gamma, n, 1)
+        zero(stream: stream, U_t1, Ds, 1)
+        zero(stream: stream, elig, n*k, 1)
         stream.advance()
     }
 }
 public func cortex_setup() -> CortexPrime{
     let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
 
-    let W_conv_r3  = GPUBuffer<Float>(device: device, capacity: 7)
-    let W_conv_r5  = GPUBuffer<Float>(device: device, capacity: 11)
-    let W_conv_r7  = GPUBuffer<Float>(device: device, capacity: 15)
+    let W_pred = GPUBuffer<Float>(device: device, capacity: Int(Ds*n*k))
+
+    let W_conv_r3 = GPUBuffer<Float>(device: device, capacity: 7)
+    let W_conv_r5 = GPUBuffer<Float>(device: device, capacity: 11)
+    let W_conv_r7 = GPUBuffer<Float>(device: device, capacity: 15)
     let W_conv_r11 = GPUBuffer<Float>(device: device, capacity: 23)
 
     let W_inhib_sub_r3 = GPUBuffer<Float>(device: device, capacity: 7)
     let W_inhib_div_r7 = GPUBuffer<Float>(device: device, capacity: 15)
 
-    let beta   = GPUBuffer<Float>(device: device, capacity: Int(n))
+    let beta = GPUBuffer<Float>(device: device, capacity: Int(n))
     zero(stream: stream, beta, n, 1)
-    zero(stream: stream, W_conv_r3, 7, 1)
-    zero(stream: stream, W_conv_r5, 11, 1)
-    zero(stream: stream, W_conv_r7, 15, 1)
-    zero(stream: stream, W_conv_r11, 23, 1)
-    zero(stream: stream, W_inhib_sub_r3, 7, 1)
-    zero(stream: stream, W_inhib_div_r7, 15, 1)
     stream.advance()
     stream.synchronize()
     for i in 0..<Int(n) {
         beta.ptr()[i] = 1.5
+    }
+    for i in 0..<Int(Ds*n*k) {
+        W_pred.ptr()[i] = Float.random(in: -0.01...0.01) / sqrt(Float(n * k))
     }
     let a_conv_r3: [Float] = [
         0.05, 0.10, 0.20, 0.30, 0.20, 0.10, 0.05
@@ -508,11 +514,7 @@ public func cortex_setup() -> CortexPrime{
     load(a_inhib_sub_r3, into: W_inhib_sub_r3)
     load(a_inhib_div_r7, into: W_inhib_div_r7)
     for i in 0..<(n*r) {
-        B.ptr()[Int(i)] = Float.random(in: -0.005...0.005)
-    }
-    let scaleB = 1.0 / sqrt(Float(n))
-    for i in 0..<(n * r) {
-        B.ptr()[Int(i)] *= scaleB
+        B.ptr()[Int(i)] = Float.random(in: -0.005...0.005) / sqrt(Float(n))
     }
 
     let cortex = CortexPrime(
@@ -521,7 +523,9 @@ public func cortex_setup() -> CortexPrime{
         n: n,
         k: k,
         r: r,
+        Ds: Ds,
         B: B,
+        W_pred: W_pred,
         W_conv_r3: W_conv_r3,
         W_conv_r5: W_conv_r5,
         W_conv_r7: W_conv_r7,
@@ -536,14 +540,12 @@ public func cortex_setup() -> CortexPrime{
         l2: 0.97,
         eta_max: 1e-4,
         oja_bias: 0.0,
-        w_NE: 0.3,
-        w_ACh: 0.6,
-        w_DA: 2.0,
         w2_NE: 0.03,
         dt: 0.02,
         alpha_gamma: 0.15,
         leak: 0.005,
-        gw_DA: 1.0
+        gw_DA: 1.0,
+        alpha_eta: 0.1
     )
     stream.advance()
     stream.synchronize()

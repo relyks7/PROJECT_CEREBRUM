@@ -166,27 +166,6 @@ public final class ThalamusPrime{
         )
         stream.advance()
     }
-    func chem_mean(
-        NE: GPUBuffer<Float>,
-        ACh: GPUBuffer<Float>,
-        DA: GPUBuffer<Float>
-    ){
-        chemical_compress(
-            stream: stream,
-            NE,
-            ACh,
-            DA,
-            mean_scratch_0,
-            mean_scratch_1,
-            NE_0,
-            ACh_0,
-            DA_0,
-            &NE_c,
-            &ACh_c,
-            &DA_c,
-            n
-        )
-    }
     func zero_state(){
         zero(stream: stream, self.z_t0, m, 1)
         zero(stream: stream, self.z_t1, m, 1)
