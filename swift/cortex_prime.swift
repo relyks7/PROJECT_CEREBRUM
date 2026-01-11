@@ -12,6 +12,8 @@ public func cortex_step(
     _ A: GPUBuffer <Float>,
     _ B: GPUBuffer <Float>,
     _ W_pred: GPUBuffer <Float>,
+    _ W_act: GPUBuffer <Float>,
+    _ a_t: GPUBuffer <Float>,
     _ U_t1: GPUBuffer<Float>,
     _ B_t: GPUBuffer <Float>,
     _ X_g0: GPUBuffer <Float>,
@@ -59,7 +61,8 @@ public func cortex_step(
     _ n_: UInt32,
     _ k_: UInt32,
     _ r_: UInt32,
-    _ Ds_: UInt32
+    _ Ds_: UInt32,
+    _ ad_: UInt32
 ){
     gemm(stream: stream, B_t, H_t0, X_g0, r_, n_, k_, 1);
     gemm(stream: stream, A, X_g0, X_g, n_, r_, k_, 1);
@@ -120,6 +123,7 @@ public func cortex_step(
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
     axbpy(stream: stream, elig, H_t0, elig, n_*k_, 1, 1.0-l2, 0)
     gemv(stream:stream, W_pred, H_t0, U_t1, Ds_, n_*k_)
+    gemv(stream:stream, W_act, H_t0, a_t, ad_, n_*k_)
 }
 //NB: ASSUME B_t IS ALREADY SET (given that B is constant)
 public func oja(
@@ -211,8 +215,11 @@ public final class CortexPrime{
     let k: UInt32
     let r: UInt32
     let Ds: UInt32
+    let ad: UInt32
     let lambda: Float
     var W_pred: GPUBuffer <Float>
+    var W_act: GPUBuffer <Float>
+    var a_t: GPUBuffer <Float>,
     var U_t1: GPUBuffer <Float>
     var W_conv_r3: GPUBuffer <Float>
     var W_conv_r5: GPUBuffer <Float>
@@ -242,8 +249,10 @@ public final class CortexPrime{
         k: UInt32, 
         r: UInt32,
         Ds: UInt32,
+        ad: UInt32,
         B: GPUBuffer<Float>,
         W_pred: GPUBuffer<Float>,
+        W_act: GPUBuffer<Float>,
         W_conv_r3: GPUBuffer<Float>,
         W_conv_r5: GPUBuffer<Float>,
         W_conv_r7: GPUBuffer<Float>,
@@ -268,6 +277,7 @@ public final class CortexPrime{
         self.k=k
         self.r=r
         self.Ds=Ds
+        self.ad=ad
         self.device=device
         self.stream=stream
         self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
@@ -315,6 +325,8 @@ public final class CortexPrime{
         self.H=GPUBuffer(device: device, capacity: Int(n*r))
         self.U_t1=GPUBuffer(device: device, capacity: Int(Ds))
         self.W_pred=W_pred
+        self.W_act=W_act
+        self.a_t=GPUBuffer(device: device, capacity: Int(ad))
         self.W_conv_r3=W_conv_r3
         self.W_conv_r5=W_conv_r5
         self.W_conv_r7=W_conv_r7
@@ -354,6 +366,8 @@ public final class CortexPrime{
             A,
             B, 
             W_pred,
+            W_act,
+            a_t,
             U_t1,
             B_t,
             X_g0,
@@ -401,7 +415,8 @@ public final class CortexPrime{
             n,
             k,
             r,
-            Ds
+            Ds,
+            ad
         )
         
         stream.advance()
@@ -452,6 +467,7 @@ public final class CortexPrime{
         zero(stream: stream, mu, n, 1)
         zero(stream: stream, gamma, n, 1)
         zero(stream: stream, U_t1, Ds, 1)
+        zero(stream: stream, a_t, ad, 1)
         zero(stream: stream, elig, n*k, 1)
         stream.advance()
     }
@@ -460,7 +476,7 @@ public func cortex_setup() -> CortexPrime{
     let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
 
     let W_pred = GPUBuffer<Float>(device: device, capacity: Int(Ds*n*k))
-
+    let W_act = GPUBuffer<Float>(device: device, capacity: Int(ad*n*k))
     let W_conv_r3 = GPUBuffer<Float>(device: device, capacity: 7)
     let W_conv_r5 = GPUBuffer<Float>(device: device, capacity: 11)
     let W_conv_r7 = GPUBuffer<Float>(device: device, capacity: 15)
@@ -478,6 +494,9 @@ public func cortex_setup() -> CortexPrime{
     }
     for i in 0..<Int(Ds*n*k) {
         W_pred.ptr()[i] = Float.random(in: -0.01...0.01) / sqrt(Float(n * k))
+    }
+    for i in 0..<Int(ad*n*k) {
+        W_act.ptr()[i] = Float.random(in: -0.01...0.01) / sqrt(Float(n * k))
     }
     let a_conv_r3: [Float] = [
         0.05, 0.10, 0.20, 0.30, 0.20, 0.10, 0.05
@@ -524,8 +543,10 @@ public func cortex_setup() -> CortexPrime{
         k: k,
         r: r,
         Ds: Ds,
+        ad: ad,
         B: B,
         W_pred: W_pred,
+        W_act: W_act, 
         W_conv_r3: W_conv_r3,
         W_conv_r5: W_conv_r5,
         W_conv_r7: W_conv_r7,

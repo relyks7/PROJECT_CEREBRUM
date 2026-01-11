@@ -6,14 +6,15 @@ let k: UInt32 = 128
 let r: UInt32 = 256
 let m: UInt32 = 64
 let Ds: UInt32 = 128
+let ad: UInt32 = 16
 let hr: UInt32 = 256
 let context=MetalContext(kernelsDirectory: URL(fileURLWithPath: "../kernels"))
 let device=context.device
 let stream = ComputeStream(context: context)
 public final class Cerebrum{
-    let DA_c: Float=0
-    let NE_c: Float=0
-    let ACh_c: Float=0
+    var DA_c: Float=0
+    var NE_c: Float=0
+    var ACh_c: Float=0
     let d_NE: Float
     let d_ACh: Float
     let d_DA: Float
@@ -34,9 +35,9 @@ public final class Cerebrum{
         self.d_NE=0.995
         self.d_ACh=0.998
         self.d_DA=0.997
-        self.k_NE=?
-        self.k_ACh=?
-        self.k_DA=?
+        self.k_NE=2.0
+        self.k_ACh=5.0
+        self.k_DA=20.0
         self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
@@ -64,8 +65,8 @@ public final class Cerebrum{
     func step(
         U_t: GPUBuffer<Float>
     ){
-        update_chemicals()
         sub(stream: stream, Cortex.U_t1, U_t, prediction_error, n*k, 1)
+        update_chemicals()
         BasalGanglia.step(
             H_t0: Cortex.H_t0,
             DA_c: DA_c
