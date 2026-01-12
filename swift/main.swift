@@ -38,7 +38,7 @@ public final class Cerebrum{
         self.k_NE=2.0
         self.k_ACh=5.0
         self.k_DA=20.0
-        self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(Ds))
         self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.err_sign=GPUBuffer<Float>(device: device, capacity: 1)
@@ -53,9 +53,9 @@ public final class Cerebrum{
         self.Hippocampus.zero_state()
     }
     func update_chemicals(){
-        mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sign, n*k, 1)
-        abs_mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_abs, n*k, 1)
-        sqmean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sq, n*k, 1)
+        mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sign, Ds, 1)
+        abs_mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_abs, Ds, 1)
+        sqmean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sq, Ds, 1)
         stream.advance()
         stream.synchronize()
         DA_c=d_DA*DA_c+(1-d_DA)*tanh(err_sign.ptr()[0]*k_DA)
@@ -65,7 +65,7 @@ public final class Cerebrum{
     func step(
         U_t: GPUBuffer<Float>
     ){
-        sub(stream: stream, Cortex.U_t1, U_t, prediction_error, n*k, 1)
+        sub(stream: stream, Cortex.U_t1, U_t, prediction_error, Ds, 1)
         update_chemicals()
         BasalGanglia.step(
             H_t0: Cortex.H_t0,
