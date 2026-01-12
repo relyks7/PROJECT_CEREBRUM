@@ -69,6 +69,7 @@ public final class Cerebrum{
         update_chemicals()
         BasalGanglia.step(
             H_t0: Cortex.H_t0,
+            a_t: Cortex.a_t,
             DA_c: DA_c
         )
         Thalamus.step(

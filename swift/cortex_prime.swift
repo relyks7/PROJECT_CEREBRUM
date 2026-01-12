@@ -219,7 +219,7 @@ public final class CortexPrime{
     let lambda: Float
     var W_pred: GPUBuffer <Float>
     var W_act: GPUBuffer <Float>
-    var a_t: GPUBuffer <Float>,
+    var a_t: GPUBuffer <Float>
     var U_t1: GPUBuffer <Float>
     var W_conv_r3: GPUBuffer <Float>
     var W_conv_r5: GPUBuffer <Float>
@@ -236,6 +236,7 @@ public final class CortexPrime{
     var softlog_alpha: Float
     var inhib_alpha: Float
     var alpha_gamma: Float
+    var alpha_eta: Float
     var l2: Float
     var gw_DA: Float
     var eta_max: Float

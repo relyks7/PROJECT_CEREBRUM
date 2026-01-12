@@ -1,6 +1,43 @@
 import Metal
 import Foundation
 import Darwin
+public func optra(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ alpha_: Float,
+    _ beta_: Float,
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    var alpha=alpha_
+    var beta=beta_
+    stream.dispatch(
+        kernel: "1ptra",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&alpha),
+            bytes(&beta)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
 public func add(
     stream: ComputeStream,
     _ A: GPUBuffer <Float>,
@@ -1637,7 +1674,6 @@ public func get_eta(
     precondition(eligmean.count==Int(n_), "eligmean has wrong size")
     precondition(elig.count == Int(n_*k_), "elig has wrong size")
     var n=n_
-    var k=k_
     var eta_max=eta_max_
     var alpha=alpha_
     var DA_c=DA_c_
@@ -1647,7 +1683,7 @@ public func get_eta(
         args: [
             .buffer(eligmean.buffer),
             .buffer(eta.buffer),
-            bytes(&eta_max)
+            bytes(&eta_max),
             bytes(&n),
             bytes(&DA_c),
             bytes(&alpha)

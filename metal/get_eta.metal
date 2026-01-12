@@ -10,6 +10,6 @@ kernel void get_eta(
     uint i[[thread_position_in_grid]]
 ){
     if (i<n){
-        eta[i]=eta_max*tanh(alpha*eligmean[i])*DA_c
+        eta[i]=eta_max*tanh(alpha*eligmean[i])*DA_c;
     }
 }
