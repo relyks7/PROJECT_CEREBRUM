@@ -1,20 +1,41 @@
-% 1. Global Coupled Dynamical System
-\mathbf{H}_{t+dt} = \mathbf{\Lambda}(\nu) \odot \mathbf{H}_t + dt \mathbf{\Gamma}(\nu) \odot \mathbf{\Psi}(\mathbf{H}_t, \mathbf{U}_t, \nu)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THE UNIFIED CEREBRUM DYNAMICAL SYSTEM
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% 2. LAYER-WISE CORTICAL OPERATOR (Layer l)
-\Psi^{(l)} = \frac{f_{\text{softlog}}\left((1 - ACh_c) \Phi(H_t^{(l)}) + \mathcal{T}(H_t^{(l-1)}, U_t, g^{(l)})\right) - \text{sub}(\nu)}{\text{div}(\nu)}
+% 1. GLOBAL VOLUMETRIC GRADIENT (Neuromodulation via Prediction Error Statistics)
+% E = U_pred - U_target (where U is the sensory/projection stream)
+\nu_{t+1} = (1 - \delta)\nu_t + \delta \cdot \tanh(k_{chem} \cdot \text{Metric}(\mathbf{E}))
 
-% 3. OPERATOR DEFINITIONS
-% Recurrence (Low-Rank Projection + Meso-scale Convolutions)
-\Phi(H) = A B^T H + \sum_{r \in \{3,5,7,11\}} w_r \ast H^T
+% Metric Mapping:
+% DA_c  (Dopamine)       ∝ mean(E)    -> Reward Prediction Error (Bias/Plasticity)
+% NE_c  (Norepinephrine) ∝ mean(|E|)  -> Saliency/Arousal (Gain/Arousal)
+% ACh_c (Acetylcholine)  ∝ mean(E^2)  -> Uncertainty (Signal/Recurrence Ratio)
 
-% Non-linear Activation (Soft-Log Compression)
-f_{\text{softlog}}(x) = x \cdot \frac{\ln(1 + \alpha |x|)}{|x| + \epsilon}
+% 2. BASAL GANGLIA GATING (Dual-Path Selection & Contrast Enhancement)
+% Raw Go/NoGo Integration
+G_{raw} = \kappa \cdot [ \sigma((1+\alpha DA_c) \cdot s) - \sigma(-(1+\beta DA_c) \cdot s) ]
 
-% Neuromodulated Inhibition (Dale's Law & Homeostatic Scaling)
-\text{div}(\nu) = \max\left(\gamma_0(1 + g_{DA}) + (1 + ACh_c)\beta \cdot \gamma_{neuromod}, 10^{-3}\right)
-\text{sub}(\nu) = \alpha_{inhib} \cdot \mu \cdot (1 + g_{DA})
+% Z-Score Normalization (Contrast Enhancement Loop)
+z_i = \frac{G_{i} - \mu_G}{\sigma_G + \epsilon} \implies g_i = \exp(k_{contrast} \cdot z_i)
 
-% 4. INFORMATION ROUTING (Hierarchical Connectivity)
-% The global adjacency matrix W is block-tridiagonal:
-\mathbf{W} = \text{tridiag}\left(\text{Top-Down}_l, \text{Recurrent}_l, \text{Bottom-Up}_l\right)
+% 3. THALAMIC DSB RELAY (Hierarchical Information Relay)
+% B_t = Neuromodulated sum of Bottom-Up drive (H_prev) and Top-Down expectation (U_t)
+z_{t+1} = \text{ReLU}\left((1-\lambda_{decay})z_t + B_t\right) \cdot g_t
+E_t^{(l)} = W_{tc} z_{t+1}
+
+% 4. CORTICAL DYANMICS (Meso-scale Recurrence with Lateral Inhibition)
+\Psi^{(l)} = \frac{f_{\text{softlog}}\left((1 - ACh_c) (\Phi_{rec}(H_t^{(l)}) + E_t^{(l)})\right) - \sigma_{sub}}{\sigma_{div}}
+
+% Meso-scale Kernels (Spatial competition):
+% sigma_sub = local subtractive kernel (r=3)
+% sigma_div = local divisive gain kernel (r=7)
+
+% 5. MULTI-SCALE PLASTICITY (Neuromodulated Oja Rules)
+% Cortex (Real-time Low-Rank Associative Manifold Discovery)
+\Delta A = \eta_{gate} [ \mathcal{E} \cdot H^T B - H(H^T A)(B^T B) ] - \lambda A
+
+% Basal Ganglia (Striatal Synaptic Competition / Action-Value Mapping)
+\Delta W_{str} = \eta_{DA} \cdot (g H^T - g^2 W_{str})
+
+% 6. MOTOR GAIN MODULATION (Optra)
+\text{Action}_t = 1 + \beta \cdot \tanh(\alpha \cdot \text{Action}_{raw})
