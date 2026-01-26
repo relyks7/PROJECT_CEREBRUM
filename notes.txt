@@ -2,40 +2,46 @@
 % THE UNIFIED CEREBRUM DYNAMICAL SYSTEM
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% 1. GLOBAL VOLUMETRIC GRADIENT (Neuromodulation via Prediction Error Statistics)
-% E = U_pred - U_target (where U is the sensory/projection stream)
+% 1. GLOBAL VOLUMETRIC GRADIENT (Neuromodulation via Error Statistics)
+% Response to Prediction Error: E = U_pred - U_target
 \nu_{t+1} = (1 - \delta)\nu_t + \delta \cdot \tanh(k_{chem} \cdot \text{Metric}(\mathbf{E}))
 
-% Metric Mapping:
-% DA_c  (Dopamine)       ∝ mean(E)    -> Reward Prediction Error (Bias/Plasticity)
-% NE_c  (Norepinephrine) ∝ mean(|E|)  -> Saliency/Arousal (Gain/Arousal)
-% ACh_c (Acetylcholine)  ∝ mean(E^2)  -> Uncertainty (Signal/Recurrence Ratio)
+% DA (Dopamine)       ∝ mean(E)    -> Reward Prediction Error
+% NE (Norepinephrine) ∝ mean(|E|)  -> Salience (State Gain / Arousal)
+% ACh (Acetylcholine) ∝ mean(E^2)  -> Uncertainty (Signal-to-Memory Ratio)
 
 % 2. BASAL GANGLIA GATING (Dual-Path Selection & Contrast Enhancement)
-% Raw Go/NoGo Integration
+% Go/NoGo Integration:
 G_{raw} = \kappa \cdot [ \sigma((1+\alpha DA_c) \cdot s) - \sigma(-(1+\beta DA_c) \cdot s) ]
 
-% Z-Score Normalization (Contrast Enhancement Loop)
-z_i = \frac{G_{i} - \mu_G}{\sigma_G + \epsilon} \implies g_i = \exp(k_{contrast} \cdot z_i)
+% Z-Score Normalization (Winner-Take-All Contrast enhancement):
+g_i = \exp\left( \text{mix}(k_{low}, k_{high}, DA_c) \cdot \frac{G_{i} - \mu_G}{\sigma_G + \epsilon} \right)
 
-% 3. THALAMIC DSB RELAY (Hierarchical Information Relay)
-% B_t = Neuromodulated sum of Bottom-Up drive (H_prev) and Top-Down expectation (U_t)
-z_{t+1} = \text{ReLU}\left((1-\lambda_{decay})z_t + B_t\right) \cdot g_t
+% 3. THALAMIC DSB RELAY (Temporal Information Accumulation)
+% Input integration from adjacent layers gated by the BG (g_t):
+z_{t+1} = \text{ReLU}\left((1-\lambda_{decay})z_t + \text{Input}_{stacked}\right) \cdot g_t
 E_t^{(l)} = W_{tc} z_{t+1}
 
-% 4. CORTICAL DYANMICS (Meso-scale Recurrence with Lateral Inhibition)
-\Psi^{(l)} = \frac{f_{\text{softlog}}\left((1 - ACh_c) (\Phi_{rec}(H_t^{(l)}) + E_t^{(l)})\right) - \sigma_{sub}}{\sigma_{div}}
+% 4. CORTICAL DYANMICS (Meso-scale Recurrence & Lateral Inhibition)
+\Psi^{(l)} = \frac{f_{\text{softlog}}\left((1 - ACh_c) (\Phi_{rec}(H_t) + E_t)\right) - \sigma_{sub}}{\sigma_{div}}
 
-% Meso-scale Kernels (Spatial competition):
-% sigma_sub = local subtractive kernel (r=3)
-% sigma_div = local divisive gain kernel (r=7)
+% Meso-scale inhibitory kernels:
+% sigma_sub = local competition kernel (r=3)
+% sigma_div = local homeostatic scaling kernel (r=7)
 
-% 5. MULTI-SCALE PLASTICITY (Neuromodulated Oja Rules)
-% Cortex (Real-time Low-Rank Associative Manifold Discovery)
+% 5. HIPPOCAMPAL MEMORY (Oscillatory Storage & Pattern Completion)
+% Storage Phase (High ACh certainty):
+HC_t = (1-\lambda)HC_{t-1} + \alpha(ACh, \nu) \cdot \text{ReLU}(H_t P + B \sin \omega t - \theta)
+
+% Recall Phase (Low ACh uncertainty):
+H_t = H_t + \epsilon(1-ACh, \nu) \cdot (HC_{t-1} Q)
+
+% 6. MULTI-SCALE PLASTICITY (Neuromodulated Oja Principles)
+% Cortex (Real-time Low-Rank Manifold Discovery):
 \Delta A = \eta_{gate} [ \mathcal{E} \cdot H^T B - H(H^T A)(B^T B) ] - \lambda A
 
-% Basal Ganglia (Striatal Synaptic Competition / Action-Value Mapping)
+% Basal Ganglia (Synaptic Competition for Action Value):
 \Delta W_{str} = \eta_{DA} \cdot (g H^T - g^2 W_{str})
 
-% 6. MOTOR GAIN MODULATION (Optra)
+% 7. MOTOR ACTION MODULATION (Optra)
 \text{Action}_t = 1 + \beta \cdot \tanh(\alpha \cdot \text{Action}_{raw})
