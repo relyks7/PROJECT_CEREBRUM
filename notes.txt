@@ -1,4 +1,20 @@
-issue 1: the agent does nothing meaningful
-solution: get the agent to predict the next U_t
-issue 2: neuromodulators has no purpose
-solution: let them be statistics.
+% 1. Global Coupled Dynamical System
+\mathbf{H}_{t+dt} = \mathbf{\Lambda}(\nu) \odot \mathbf{H}_t + dt \mathbf{\Gamma}(\nu) \odot \mathbf{\Psi}(\mathbf{H}_t, \mathbf{U}_t, \nu)
+
+% 2. LAYER-WISE CORTICAL OPERATOR (Layer l)
+\Psi^{(l)} = \frac{f_{\text{softlog}}\left((1 - ACh_c) \Phi(H_t^{(l)}) + \mathcal{T}(H_t^{(l-1)}, U_t, g^{(l)})\right) - \text{sub}(\nu)}{\text{div}(\nu)}
+
+% 3. OPERATOR DEFINITIONS
+% Recurrence (Low-Rank Projection + Meso-scale Convolutions)
+\Phi(H) = A B^T H + \sum_{r \in \{3,5,7,11\}} w_r \ast H^T
+
+% Non-linear Activation (Soft-Log Compression)
+f_{\text{softlog}}(x) = x \cdot \frac{\ln(1 + \alpha |x|)}{|x| + \epsilon}
+
+% Neuromodulated Inhibition (Dale's Law & Homeostatic Scaling)
+\text{div}(\nu) = \max\left(\gamma_0(1 + g_{DA}) + (1 + ACh_c)\beta \cdot \gamma_{neuromod}, 10^{-3}\right)
+\text{sub}(\nu) = \alpha_{inhib} \cdot \mu \cdot (1 + g_{DA})
+
+% 4. INFORMATION ROUTING (Hierarchical Connectivity)
+% The global adjacency matrix W is block-tridiagonal:
+\mathbf{W} = \text{tridiag}\left(\text{Top-Down}_l, \text{Recurrent}_l, \text{Bottom-Up}_l\right)

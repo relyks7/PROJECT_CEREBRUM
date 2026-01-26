@@ -1,6 +1,7 @@
 import Metal
 import Foundation
 import Darwin
+/*
 let n: UInt32 = 2048
 let k: UInt32 = 128
 let r: UInt32 = 256
@@ -8,6 +9,7 @@ let m: UInt32 = 64
 let Ds: UInt32 = 128
 let ad: UInt32 = 16
 let hr: UInt32 = 256
+*/
 let context=MetalContext(kernelsDirectory: URL(fileURLWithPath: "../kernels"))
 let device=context.device
 let stream = ComputeStream(context: context)
@@ -38,12 +40,6 @@ public final class Cerebrum{
         self.k_NE=2.0
         self.k_ACh=5.0
         self.k_DA=20.0
-        self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(Ds))
-        self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
-        self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
-        self.err_sign=GPUBuffer<Float>(device: device, capacity: 1)
-        self.err_abs=GPUBuffer<Float>(device: device, capacity: 1)
-        self.err_sq=GPUBuffer<Float>(device: device, capacity: 1)
         self.Cortex=cortex_setup()
         self.Thalamus=thalamus_setup()
         self.BasalGanglia=bg_setup()
@@ -51,6 +47,12 @@ public final class Cerebrum{
         self.Cortex.zero_state()
         self.Thalamus.zero_state()
         self.Hippocampus.zero_state()
+        self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(Ds))
+        self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.err_sign=GPUBuffer<Float>(device: device, capacity: 1)
+        self.err_abs=GPUBuffer<Float>(device: device, capacity: 1)
+        self.err_sq=GPUBuffer<Float>(device: device, capacity: 1)
     }
     func update_chemicals(){
         mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sign, Ds, 1)
