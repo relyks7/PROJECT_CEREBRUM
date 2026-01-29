@@ -62,7 +62,7 @@ public final class HippocampusPrime{
     var theta: Float
     var lambda: Float
     var tau_b: Float
-    let omega: Float=2*3.141592653589793/80
+    let omega: Float //=2*3.141592653589793/80
     init(
         device: MTLDevice,
         stream: ComputeStream,
@@ -76,7 +76,8 @@ public final class HippocampusPrime{
         alpha: Float,
         theta: Float,
         lambda: Float,
-        tau_b: Float
+        tau_b: Float,
+        omega: Float
     ){
         self.device=device
         self.stream = stream
@@ -95,6 +96,7 @@ public final class HippocampusPrime{
         self.theta=theta
         self.lambda=lambda
         self.tau_b=tau_b
+        self.omega=omega
     }
     func step(
         H_t: GPUBuffer<Float>,
@@ -133,7 +135,17 @@ public final class HippocampusPrime{
         zero(stream: stream, HC_t, n*hr, 1)
     }
 }
-public func hippocampus_setup() -> HippocampusPrime{
+public func hippocampus_setup(
+    n: UInt32,
+    k: UInt32,
+    hr: UInt32,
+    epsilon: Float,
+    alpha: Float,
+    theta: Float,
+    lambda: Float,
+    tau_b: Float,
+    omega: Float
+) -> HippocampusPrime{
     let P=GPUBuffer<Float>(device: device, capacity: Int(k*hr))
     let Q=GPUBuffer<Float>(device: device, capacity: Int(hr*k))
     let B=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
@@ -162,11 +174,20 @@ public func hippocampus_setup() -> HippocampusPrime{
         P: P,
         Q: Q,
         B: B,
-        epsilon: 0.02,
-        alpha: 0.05,
-        theta: 0.2,
-        lambda: 0.01,
-        tau_b: 0.15
+        epsilon: epsilon,
+        alpha: alpha,
+        theta: theta,
+        lambda: lambda,
+        tau_b: tau_b,
+        omega: omega
     )
+    /*
+    epsilon: 0.02,
+    alpha: 0.05,
+    theta: 0.2,
+    lambda: 0.01,
+    tau_b: 0.15,
+    omega: 2*3.141592653589793/80
+    */
     return hc
 }

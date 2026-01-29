@@ -193,7 +193,21 @@ public final class BasalGangliaPrime{
         stream.advance()
     }
 }
-public func bg_setup() -> BasalGangliaPrime{
+public func bg_setup(
+    m: UInt32,
+    n: UInt32,
+    k: UInt32,
+    ad: UInt32,
+    alpha: Float,
+    alpha_f: Float,
+    beta: Float,
+    kappa: Float,
+    eta0: Float,
+    eta_max: Float,
+    gamma: Float,
+    k_low: Float,
+    k_high: Float
+) -> BasalGangliaPrime{
     let W_str=GPUBuffer<Float>(device: device, capacity: Int(m*n*k))
     let W_bgact=GPUBuffer<Float>(device: device, capacity: Int(ad*m))
     let b_str=GPUBuffer<Float>(device: device, capacity: Int(m))
@@ -220,7 +234,19 @@ public func bg_setup() -> BasalGangliaPrime{
         n: n, 
         k: k,
         ad: ad,
-        alpha:2.0,
+        alpha: alpha,
+        alpha_f: alpha_f,
+        beta: beta,
+        kappa: kappa,
+        eta0: eta0,
+        eta_max: eta_max,
+        w_max: wwscale,
+        gamma: gamma,
+        k_low: k_low,
+        k_high: k_high
+    )
+    /*
+        alpha: 2.0,
         alpha_f: 1.25,
         beta:2.0,
         kappa:8.0,
@@ -230,6 +256,6 @@ public func bg_setup() -> BasalGangliaPrime{
         gamma: 3.0,
         k_low: 0.8,
         k_high: 1.6
-    )
+    */
     return bg
 }

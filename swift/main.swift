@@ -40,7 +40,9 @@ public final class Cerebrum{
         self.k_NE=2.0
         self.k_ACh=5.0
         self.k_DA=20.0
-        self.Cortex=cortex_setup()
+        self.CortexL1=cortex_setup()
+        self.CortexL2=cortex_setup()
+        self.CortexL3=cortex_setup()
         self.Thalamus=thalamus_setup()
         self.BasalGanglia=bg_setup()
         self.Hippocampus=hippocampus_setup()

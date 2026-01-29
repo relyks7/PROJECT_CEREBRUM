@@ -173,7 +173,15 @@ public final class ThalamusPrime{
         stream.advance()
     }
 }
-public func thalamus_setup() -> ThalamusPrime{
+public func thalamus_setup(
+    m: UInt32,
+    n: UInt32,
+    k: UInt32,
+    lambda_t: Float,
+    w_ACh_0: Float,
+    w_ACh_1: Float,
+    w_NE: Float
+) -> ThalamusPrime{
     let W_cx = GPUBuffer<Float>(
         device: device,
         capacity: Int(m) * Int(n * k)
@@ -208,10 +216,16 @@ public func thalamus_setup() -> ThalamusPrime{
         n: n,
         k: k,
         Ds: Ds,
-        lambda_t: 0.02,
-        w_ACh_0: 0.6,
-        w_ACh_1: 0.4,
-        w_NE: 0.5
+        lambda_t: lambda_t,
+        w_ACh_0: w_ACh_0,
+        w_ACh_1: w_ACh_1,
+        w_NE: w_NE
     )
+    /*
+    lambda_t: 0.02,
+    w_ACh_0: 0.6,
+    w_ACh_1: 0.4,
+    w_NE: 0.5
+    */
     return thalamus
 }

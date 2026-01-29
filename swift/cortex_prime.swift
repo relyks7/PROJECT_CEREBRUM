@@ -473,7 +473,26 @@ public final class CortexPrime{
         stream.advance()
     }
 }
-public func cortex_setup() -> CortexPrime{
+public func cortex_setup(
+    n: UInt32,
+    k: UInt32,
+    r: UInt32,
+    Ds: UInt32,
+    ad: UInt32,
+    softlog_alpha: Float,
+    mes_alpha: Float,
+    inhib_alpha: Float,
+    lambda: Float,
+    l2: Float,
+    eta_max: Float,
+    oja_bias: Float,
+    w2_NE: Float,
+    dt: Float,
+    alpha_gamma: Float,
+    leak: Float,
+    gw_DA: Float,
+    alpha_eta: Float,
+) -> CortexPrime{
     let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
 
     let W_pred = GPUBuffer<Float>(device: device, capacity: Int(Ds*n*k))
@@ -555,20 +574,35 @@ public func cortex_setup() -> CortexPrime{
         W_inhib_sub_r3: W_inhib_sub_r3,
         W_inhib_div_r7: W_inhib_div_r7,
         beta: beta,
-        softlog_alpha: 1.2,
-        mes_alpha: 0.12,
-        inhib_alpha: 0.9,
-        lambda: 2e-5,
-        l2: 0.97,
-        eta_max: 1e-4,
-        oja_bias: 0.0,
-        w2_NE: 0.03,
-        dt: 0.02,
-        alpha_gamma: 0.15,
-        leak: 0.005,
-        gw_DA: 1.0,
-        alpha_eta: 0.1
+        softlog_alpha: softlog_alpha,
+        mes_alpha: mes_alpha,
+        inhib_alpha: inhib_alpha,
+        lambda: lambda,
+        l2: l2,
+        eta_max: eta_max,
+        oja_bias: oja_bias,
+        w2_NE: w2_NE,
+        dt: dt,
+        alpha_gamma: alpha_gamma,
+        leak: leak,
+        gw_DA: gw_DA,
+        alpha_eta: alpha_eta
     )
+    /*
+    softlog_alpha: 1.2,
+    mes_alpha: 0.12,
+    inhib_alpha: 0.9,
+    lambda: 2e-5,
+    l2: 0.97,
+    eta_max: 1e-4,
+    oja_bias: 0.0,
+    w2_NE: 0.03,
+    dt: 0.02,
+    alpha_gamma: 0.15,
+    leak: 0.005,
+    gw_DA: 1.0,
+    alpha_eta: 0.1
+    */
     stream.advance()
     stream.synchronize()
     for i in 0..<(n*r) {
