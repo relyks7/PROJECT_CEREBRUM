@@ -1,4 +1,10 @@
+EMERGENCY CUCAI PLAN
+-quick fix: replace update_chemicals with a metal kernel - need for speed
+-stack cortices, get everything acting on layers
+-add figure eight
+-tune, tune, tune!
+
+other notes stuff:
 -stack cortices (everything else acts on separate layers), perhaps low-rank matrix chemicals
 -hippocampus: add internal recurrent weight matrix
 -reconsolidate everything once done
-here's my plan
