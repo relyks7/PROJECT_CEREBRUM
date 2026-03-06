@@ -158,6 +158,33 @@ public func oja(
     final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_, DA_c_)
     copy(stream: stream, A_new, A, n_*r_, 1)
 }
+public func update_chemicals(
+    _ prediction_error: GPUBuffer<Float>,
+    _ scratch0: GPUBuffer<Float>,
+    _ scratch1: GPUBuffer<Float>,
+    _ err_sign: GPUBuffer<Float>,
+    _ err_abs: GPUBuffer<Float>,
+    _ err_sq: GPUBuffer<Float>,
+    _ Ds: UInt32,
+    _ DA_c: inout Float,
+    _ ACh_c: inout Float,
+    _ NE_c: inout Float,
+    _ d_DA: Float,
+    _ d_ACh:  Float,
+    _ d_NE: Float,
+    _ k_DA: Float,
+    _ k_ACh: Float,
+    _ k_NE: Float
+){
+    mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sign, Ds, 1)
+    abs_mean_simd(stream: stream, prediction_error, scratch0, scratch1, err_abs, Ds, 1)
+    sqmean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sq, Ds, 1)
+    stream.advance()
+    stream.synchronize()
+    DA_c=d_DA*DA_c+(1-d_DA)*tanh(err_sign.ptr()[0]*k_DA)
+    NE_c=d_NE*NE_c+(1-d_NE)*tanh(err_abs.ptr()[0]*k_NE)
+    ACh_c=d_ACh*ACh_c+(1-d_ACh)*tanh(err_sq.ptr()[0]*k_ACh)
+}
 public final class CortexPrime{
     //gpu
     let device: MTLDevice
@@ -180,6 +207,12 @@ public final class CortexPrime{
 
     var eta: GPUBuffer<Float>
     var H_t1_t: GPUBuffer<Float>
+
+    var prediction_error: GPUBuffer<Float>
+
+    var err_sign: GPUBuffer<Float>
+    var err_abs: GPUBuffer<Float>
+    var err_sq: GPUBuffer<Float>
     //scratch
     var H_t0_t: GPUBuffer<Float>
     var H_scratch: GPUBuffer<Float>
@@ -244,6 +277,15 @@ public final class CortexPrime{
     var dt: Float
     var leak: Float
     var w2_NE: Float
+    var DA_c: Float=0
+    var ACh_c: Float=0
+    var NE_c: Float=0
+    var d_DA: Float
+    var d_ACh:  Float
+    var d_NE: Float
+    var k_DA: Float
+    var k_ACh: Float
+    var k_NE: Float
     init(device: MTLDevice, 
         stream: ComputeStream, 
         n: UInt32, 
@@ -273,7 +315,13 @@ public final class CortexPrime{
         alpha_gamma: Float,
         leak: Float,
         gw_DA: Float,
-        alpha_eta: Float){
+        alpha_eta: Float,
+        d_DA: Float,
+        d_ACh:  Float,
+        d_NE: Float,
+        var k_DA: Float,
+        var k_ACh: Float,
+        var k_NE: Float){
         self.n=n
         self.k=k
         self.r=r
@@ -281,6 +329,16 @@ public final class CortexPrime{
         self.ad=ad
         self.device=device
         self.stream=stream
+        self.prediction_error=GPUBuffer(device: device, capacity: Int(Ds))
+        self.err_sign=GPUBuffer(device: device, capacity: 1)
+        self.err_abs=GPUBuffer(device: device, capacity: 1)
+        self.err_sq=GPUBuffer(device: device, capacity: 1)
+        self.d_DA=d_DA
+        self.d_ACh=d_ACh
+        self.d_NE=d_NE
+        self.k_DA=k_DA
+        self.k_ACh=k_ACh
+        self.k_NE=k_NE
         self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_scratch=GPUBuffer(device: device, capacity: Int(n*k))
         self.H_t1=GPUBuffer(device: device, capacity: Int(n*k))
@@ -348,7 +406,6 @@ public final class CortexPrime{
         self.w2_NE=w2_NE
         self.gw_DA=gw_DA
         self.alpha_eta=alpha_eta
-        
     }
     func step(
         E_t: GPUBuffer<Float>,
@@ -419,9 +476,9 @@ public final class CortexPrime{
             Ds,
             ad
         )
-        
         stream.advance()
     }
+
     func learn(
         DA_c: Float
     ){
@@ -462,6 +519,28 @@ public final class CortexPrime{
         )
         stream.advance()
     }
+    func update_chemicals(
+        prediction_error: GPUBuffer<Float>
+    ) {
+        update_chemicals(
+            prediction_error,
+            scratch0,
+            scratch1,
+            err_sign,
+            err_abs,
+            err_sq,
+            Ds,
+            DA_c,
+            ACh_c,
+            NE_c,
+            d_DA,
+            d_ACh,
+            d_NE,
+            k_DA,
+            k_ACh,
+            k_NE
+        )
+    }
     func zero_state(){
         zero(stream: stream, self.H_t0, n*k, 1)
         zero(stream: stream, self.H_t1, n*k, 1)
@@ -470,6 +549,9 @@ public final class CortexPrime{
         zero(stream: stream, U_t1, Ds, 1)
         zero(stream: stream, a_t, ad, 1)
         zero(stream: stream, elig, n*k, 1)
+        DA_c=0
+        ACh_c=0
+        NE_c=0
         stream.advance()
     }
 }
@@ -492,6 +574,12 @@ public func cortex_setup(
     leak: Float,
     gw_DA: Float,
     alpha_eta: Float,
+    var d_DA: Float,
+    var d_ACh:  Float,
+    var d_NE: Float,
+    var k_DA: Float,
+    var k_ACh: Float,
+    var k_NE: Float
 ) -> CortexPrime{
     let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
 
@@ -586,7 +674,13 @@ public func cortex_setup(
         alpha_gamma: alpha_gamma,
         leak: leak,
         gw_DA: gw_DA,
-        alpha_eta: alpha_eta
+        alpha_eta: alpha_eta,
+        d_DA: d_DA,
+        d_ACh: d_ACh,
+        d_NE: d_NE,
+        k_DA: k_DA,
+        k_ACh: k_ACh,
+        k_NE: k_NE
     )
     /*
     softlog_alpha: 1.2,
