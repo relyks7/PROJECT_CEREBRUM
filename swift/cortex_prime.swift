@@ -119,7 +119,7 @@ public func cortex_step(
             depth: 1
         )
     )
-    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt * (1.0 + w2_NE_ * NE_c), leak * exp(-DA_c))
+    axbpy(stream: stream, H_t0, H_t1, H_scratch, n_*k_, 1, dt * (1.0 + w2_NE_ * NE_c), leak * exp(-min(max(DA_c, -0.3), 0.3)))
     copy(stream:stream, H_scratch, H_t0, n_*k_, 1)
     axbpy(stream: stream, elig, H_t0, elig, n_*k_, 1, 1.0-l2, 0)
     gemv(stream:stream, W_pred, H_t0, U_t1, Ds_, n_*k_)
@@ -158,7 +158,7 @@ public func oja(
     final_oja_step(stream: stream, G, H, eta, A, A_new, n_, r_, lambda_, DA_c_)
     copy(stream: stream, A_new, A, n_*r_, 1)
 }
-public func update_chemicals(
+public func update_chemicals_public(
     _ prediction_error: GPUBuffer<Float>,
     _ scratch0: GPUBuffer<Float>,
     _ scratch1: GPUBuffer<Float>,
@@ -181,9 +181,9 @@ public func update_chemicals(
     sqmean_simd(stream: stream, prediction_error, scratch0, scratch1, err_sq, Ds, 1)
     stream.advance()
     stream.synchronize()
-    DA_c=d_DA*DA_c+(1-d_DA)*tanh(err_sign.ptr()[0]*k_DA)
-    NE_c=d_NE*NE_c+(1-d_NE)*tanh(err_abs.ptr()[0]*k_NE)
-    ACh_c=d_ACh*ACh_c+(1-d_ACh)*tanh(err_sq.ptr()[0]*k_ACh)
+    DA_c = d_DA * DA_c + (1 - d_DA) * (1 - 2 * tanh(err_abs.ptr()[0] * k_DA))
+    NE_c = d_NE * NE_c + (1 - d_NE) * tanh(err_abs.ptr()[0] * k_NE)
+    ACh_c = d_ACh * ACh_c + (1 - d_ACh) * tanh(err_sq.ptr()[0] * k_ACh)
 }
 public final class CortexPrime{
     //gpu
@@ -191,6 +191,7 @@ public final class CortexPrime{
     let stream: ComputeStream
     //main
     var H_t0: GPUBuffer <Float>
+    var H_t0_norm: GPUBuffer <Float>
     var H_t1: GPUBuffer <Float>
     var elig: GPUBuffer <Float>
     var eligmean: GPUBuffer <Float>
@@ -207,7 +208,7 @@ public final class CortexPrime{
 
     var eta: GPUBuffer<Float>
     var H_t1_t: GPUBuffer<Float>
-
+    var eta_pred: Float
     var prediction_error: GPUBuffer<Float>
 
     var err_sign: GPUBuffer<Float>
@@ -220,6 +221,8 @@ public final class CortexPrime{
     var X_g1: GPUBuffer <Float>
     var scratch0: GPUBuffer <Float>
     var scratch1: GPUBuffer <Float>
+    var scratch2: GPUBuffer <Float>
+    var scratch3: GPUBuffer <Float>
     var M: GPUBuffer <Float>
     var X_m3_t: GPUBuffer <Float>
     var X_m5_t: GPUBuffer <Float>
@@ -319,9 +322,10 @@ public final class CortexPrime{
         d_DA: Float,
         d_ACh:  Float,
         d_NE: Float,
-        var k_DA: Float,
-        var k_ACh: Float,
-        var k_NE: Float){
+        k_DA: Float,
+        k_ACh: Float,
+        k_NE: Float,
+        eta_pred: Float){
         self.n=n
         self.k=k
         self.r=r
@@ -329,63 +333,67 @@ public final class CortexPrime{
         self.ad=ad
         self.device=device
         self.stream=stream
-        self.prediction_error=GPUBuffer(device: device, capacity: Int(Ds))
-        self.err_sign=GPUBuffer(device: device, capacity: 1)
-        self.err_abs=GPUBuffer(device: device, capacity: 1)
-        self.err_sq=GPUBuffer(device: device, capacity: 1)
+        self.prediction_error=GPUBuffer<Float>(device: device, capacity: Int(Ds))
+        self.err_sign=GPUBuffer<Float>(device: device, capacity: 1)
+        self.err_abs=GPUBuffer<Float>(device: device, capacity: 1)
+        self.err_sq=GPUBuffer<Float>(device: device, capacity: 1)
         self.d_DA=d_DA
         self.d_ACh=d_ACh
         self.d_NE=d_NE
         self.k_DA=k_DA
         self.k_ACh=k_ACh
         self.k_NE=k_NE
-        self.H_t0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.H_scratch=GPUBuffer(device: device, capacity: Int(n*k))
-        self.H_t1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.elig=GPUBuffer(device: device, capacity: Int(n*k))
-        self.eligmean=GPUBuffer(device: device, capacity: Int(n))
-        self.A=GPUBuffer(device: device, capacity: Int(n*r))
-        self.A_new=GPUBuffer(device: device, capacity: Int(n*r))
-        self.B=GPUBuffer(device: device, capacity: Int(n*r))
-        self.B_t=GPUBuffer(device: device, capacity: Int(r*n))
+        self.eta_pred=eta_pred
+        self.H_t0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.H_t0_norm=GPUBuffer<Float>(device: device, capacity: 1)
+        self.H_scratch=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.H_t1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.elig=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.eligmean=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.A=GPUBuffer<Float>(device: device, capacity: Int(n*r))
+        self.A_new=GPUBuffer<Float>(device: device, capacity: Int(n*r))
+        self.B=GPUBuffer<Float>(device: device, capacity: Int(n*r))
+        self.B_t=GPUBuffer<Float>(device: device, capacity: Int(r*n))
         copy(stream: stream, B, self.B, n*r, 1)
         transpose(stream: stream, B, self.B_t, n, r)
-        self.X_g=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu=GPUBuffer(device: device, capacity: Int(n))
-        self.gamma=GPUBuffer(device: device, capacity: Int(n))
-        self.eta=GPUBuffer(device: device, capacity: Int(n))
-        self.H_t0_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.H_t1_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_g0=GPUBuffer(device: device, capacity: Int(r*k))
-        self.X_g1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.scratch0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.scratch1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.M=GPUBuffer(device: device, capacity: 1)
-        self.X_m3_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_m5_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_m7_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_m11_t=GPUBuffer(device: device, capacity: Int(k*n))
-        self.X_m3=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m5=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m7=GPUBuffer(device: device, capacity: Int(n*k))
-        self.X_m11=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.mu2=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma0=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma1=GPUBuffer(device: device, capacity: Int(n*k))
-        self.gamma2=GPUBuffer(device: device, capacity: Int(n*k))
-        self.T1=GPUBuffer(device: device, capacity: Int(k*r))
-        self.T2=GPUBuffer(device: device, capacity: Int(k*r))
-        self.S=GPUBuffer(device: device, capacity: Int(r*r))
-        self.U=GPUBuffer(device: device, capacity: Int(k*r))
-        self.G=GPUBuffer(device: device, capacity: Int(n*r))
-        self.H=GPUBuffer(device: device, capacity: Int(n*r))
-        self.U_t1=GPUBuffer(device: device, capacity: Int(Ds))
+        self.X_g=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.X_m=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.mu=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.gamma=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.eta=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.H_t0_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.H_t1_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.X_g0=GPUBuffer<Float>(device: device, capacity: Int(r*k))
+        self.X_g1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.scratch0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.scratch1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.scratch2=GPUBuffer<Float>(device: device, capacity: Int(Ds))
+        self.scratch3=GPUBuffer<Float>(device: device, capacity: Int(Ds))
+        self.M=GPUBuffer<Float>(device: device, capacity: 1)
+        self.X_m3_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.X_m5_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.X_m7_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.X_m11_t=GPUBuffer<Float>(device: device, capacity: Int(k*n))
+        self.X_m3=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.X_m5=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.X_m7=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.X_m11=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.mu0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.mu1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.mu2=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.gamma0=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.gamma1=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.gamma2=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.T1=GPUBuffer<Float>(device: device, capacity: Int(k*r))
+        self.T2=GPUBuffer<Float>(device: device, capacity: Int(k*r))
+        self.S=GPUBuffer<Float>(device: device, capacity: Int(r*r))
+        self.U=GPUBuffer<Float>(device: device, capacity: Int(k*r))
+        self.G=GPUBuffer<Float>(device: device, capacity: Int(n*r))
+        self.H=GPUBuffer<Float>(device: device, capacity: Int(n*r))
+        self.U_t1=GPUBuffer<Float>(device: device, capacity: Int(Ds))
         self.W_pred=W_pred
         self.W_act=W_act
-        self.a_t=GPUBuffer(device: device, capacity: Int(ad))
+        self.a_t=GPUBuffer<Float>(device: device, capacity: Int(ad))
         self.W_conv_r3=W_conv_r3
         self.W_conv_r5=W_conv_r5
         self.W_conv_r7=W_conv_r7
@@ -408,10 +416,7 @@ public final class CortexPrime{
         self.alpha_eta=alpha_eta
     }
     func step(
-        E_t: GPUBuffer<Float>,
-        NE_c: Float,
-        ACh_c: Float,
-        DA_c: Float,
+        E_t: GPUBuffer<Float>
     ){
         cortex_step(
             stream: stream,
@@ -479,9 +484,7 @@ public final class CortexPrime{
         stream.advance()
     }
 
-    func learn(
-        DA_c: Float
-    ){
+    func learn(){
         get_eta(
             stream: stream,
             eta,
@@ -522,17 +525,17 @@ public final class CortexPrime{
     func update_chemicals(
         prediction_error: GPUBuffer<Float>
     ) {
-        update_chemicals(
+        update_chemicals_public(
             prediction_error,
-            scratch0,
-            scratch1,
+            scratch2,
+            scratch3,
             err_sign,
             err_abs,
             err_sq,
             Ds,
-            DA_c,
-            ACh_c,
-            NE_c,
+            &DA_c,
+            &ACh_c,
+            &NE_c,
             d_DA,
             d_ACh,
             d_NE,
@@ -552,6 +555,31 @@ public final class CortexPrime{
         DA_c=0
         ACh_c=0
         NE_c=0
+        stream.advance()
+    }
+    func learn_pred(
+        prediction_error: GPUBuffer<Float>
+    ){
+        sqmean_simd(
+            stream: stream, 
+            H_t0,
+            scratch0,
+            scratch1,
+            H_t0_norm,
+            n*k,
+            1
+        )
+        stream.advance()
+        stream.synchronize()
+        outer_prod_learn(
+            stream: stream,
+            prediction_error,
+            H_t0,
+            W_pred,
+            Ds,
+            n*k,
+            eta_pred * max(0.15, 0.5 + DA_c) / max(1.0, H_t0_norm.ptr()[0]*Float(n*k))
+        )
         stream.advance()
     }
 }
@@ -574,17 +602,18 @@ public func cortex_setup(
     leak: Float,
     gw_DA: Float,
     alpha_eta: Float,
-    var d_DA: Float,
-    var d_ACh:  Float,
-    var d_NE: Float,
-    var k_DA: Float,
-    var k_ACh: Float,
-    var k_NE: Float
+    d_DA: Float,
+    d_ACh:  Float,
+    d_NE: Float,
+    k_DA: Float,
+    k_ACh: Float,
+    k_NE: Float,
+    eta_pred: Float
 ) -> CortexPrime{
     let B = GPUBuffer<Float>(device: device, capacity: Int(n*r))
 
-    let W_pred = GPUBuffer<Float>(device: device, capacity: Int(Ds*n*k))
-    let W_act = GPUBuffer<Float>(device: device, capacity: Int(ad*n*k))
+    let W_pred = GPUBuffer<Float>(device: device, capacity: Int(Ds)*Int(n)*Int(k))
+    let W_act = GPUBuffer<Float>(device: device, capacity: Int(ad)*Int(n)*Int(k))
     let W_conv_r3 = GPUBuffer<Float>(device: device, capacity: 7)
     let W_conv_r5 = GPUBuffer<Float>(device: device, capacity: 11)
     let W_conv_r7 = GPUBuffer<Float>(device: device, capacity: 15)
@@ -594,18 +623,9 @@ public func cortex_setup(
     let W_inhib_div_r7 = GPUBuffer<Float>(device: device, capacity: 15)
 
     let beta = GPUBuffer<Float>(device: device, capacity: Int(n))
-    zero(stream: stream, beta, n, 1)
-    stream.advance()
-    stream.synchronize()
-    for i in 0..<Int(n) {
-        beta.ptr()[i] = 1.5
-    }
-    for i in 0..<Int(Ds*n*k) {
-        W_pred.ptr()[i] = Float.random(in: -0.01...0.01) / sqrt(Float(n * k))
-    }
-    for i in 0..<Int(ad*n*k) {
-        W_act.ptr()[i] = Float.random(in: -0.01...0.01) / sqrt(Float(n * k))
-    }
+    fill(stream: stream, beta, Float(1.5), n, 1)
+    fill_random(stream: stream, W_pred, Ds*n*k, 1, -0.01 / sqrt(Float(n * k)), 0.01 / sqrt(Float(n * k)))
+    fill_random(stream: stream, W_act, ad*n*k, 1, -0.01 / sqrt(Float(n * k)), 0.01 / sqrt(Float(n * k)))
     let a_conv_r3: [Float] = [
         0.05, 0.10, 0.20, 0.30, 0.20, 0.10, 0.05
     ]
@@ -640,10 +660,7 @@ public func cortex_setup(
     load(a_conv_r11, into: W_conv_r11)
     load(a_inhib_sub_r3, into: W_inhib_sub_r3)
     load(a_inhib_div_r7, into: W_inhib_div_r7)
-    for i in 0..<(n*r) {
-        B.ptr()[Int(i)] = Float.random(in: -0.005...0.005) / sqrt(Float(n))
-    }
-
+    fill_random(stream: stream, B, n*r, 1, -0.005 / sqrt(Float(n)), 0.005 / sqrt(Float(n)))
     let cortex = CortexPrime(
         device: device,
         stream: stream,
@@ -680,7 +697,8 @@ public func cortex_setup(
         d_NE: d_NE,
         k_DA: k_DA,
         k_ACh: k_ACh,
-        k_NE: k_NE
+        k_NE: k_NE,
+        eta_pred: eta_pred
     )
     /*
     softlog_alpha: 1.2,
@@ -697,17 +715,7 @@ public func cortex_setup(
     gw_DA: 1.0,
     alpha_eta: 0.1
     */
-    stream.advance()
-    stream.synchronize()
-    for i in 0..<(n*r) {
-        cortex.A.ptr()[Int(i)] = Float.random(in: -0.01...0.01)
-    }
-    let scaleA = 1.0 / sqrt(Float(r))
-    for i in 0..<(n * r) {
-        cortex.A.ptr()[Int(i)] *= scaleA
-    }
-    for i in 0..<Int(n * k) {
-        cortex.H_t0.ptr()[i] = Float.random(in: -0.01...0.01)
-    }
+    fill_random(stream: stream, cortex.A, n*r, 1, -0.01 / sqrt(Float(r)), 0.01 / sqrt(Float(r)))
+    fill_random(stream: stream, cortex.H_t0, n*k, 1, -0.01, 0.01)
     return cortex
 }

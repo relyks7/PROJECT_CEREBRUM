@@ -32,7 +32,7 @@ public func bg_step(
     gemv(stream: stream, W_str, H_t0, s0, m_, n_*k_)
     add(stream: stream, s0, b_str, s, m_, 1)
     bg_forward(stream: stream, s, g, M, ST, scratch0, scratch1, m_, DA_c_, alpha_, beta_, kappa_, gamma_, k_low, k_high)
-    gemv(stream: stream, W_bgact, g, a_tf, ad_, m)
+    gemv(stream: stream, W_bgact, g, a_tf, ad_, m_)
     optra(stream: stream, a_tf, a_t, ad_, 1, DA_c_, alpha_f_)
 }
 public func bg_learn(
@@ -213,15 +213,9 @@ public func bg_setup(
     let b_str=GPUBuffer<Float>(device: device, capacity: Int(m))
     let wwscale: Float = 1.0 / sqrt(Float(n))
     let wbscale: Float = 0.6 / sqrt(Float(m))
-    for i in 0..<m*n*k {
-        W_str.ptr()[Int(i)] = Float.random(in: -wwscale...wwscale)
-    }
-    for i in 0..<ad*m {
-        W_bgact.ptr()[Int(i)] = Float.random(in: -wbscale...wbscale)
-    }
-    for i in 0..<(m) {
-        b_str.ptr()[Int(i)] = Float.random(in: (-1.0)...(-0.2))
-    }
+    fill_random(stream: stream, W_str, m*n*k, 1, -wwscale, wwscale)
+    fill_random(stream: stream, W_bgact, ad*m, 1, -wbscale, wbscale)
+    fill_random(stream: stream, b_str, m, 1, -1.0, -0.2)
     stream.advance()
     stream.synchronize()
     let bg=BasalGangliaPrime(

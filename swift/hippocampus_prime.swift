@@ -151,12 +151,8 @@ public func hippocampus_setup(
     let B=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
     let pScale: Float = 1.0 / sqrt(Float(k))
     let noiseScale: Float = 0.02 * pScale
-    for i in 0..<Int(k*hr) {
-        P.ptr()[i] = Float.random(in: -pScale...pScale)
-    }
-    for i in 0..<Int(n*hr) {
-        B.ptr()[i] = Float.random(in: -pScale...pScale)
-    }
+    fill_random(stream: stream, P, k*hr, 1, -pScale, pScale)
+    fill_random(stream: stream, B, n*hr, 1, -pScale, pScale)
     for i in 0..<hr {
         for j in 0..<k {
             let noise = Float.random(in: -noiseScale...noiseScale)

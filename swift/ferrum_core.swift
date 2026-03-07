@@ -3,13 +3,14 @@ import Foundation
 import Darwin
 
 //<start AI_WRITTEN>
+
 // ============================================================
-// 0. SMALL HELPERS
+// 1. SMALL HELPERS
 // ============================================================
 
 @inline(__always)
 func bytes<T>(_ value: inout T) -> KernelArg {
-    return withUnsafeBytes(of: &value) {
+    withUnsafeBytes(of: &value) {
         KernelArg.bytes($0.baseAddress!, $0.count)
     }
 }
@@ -21,53 +22,48 @@ func load(_ src: [Float], into dst: GPUBuffer<Float>) {
 }
 
 // ============================================================
-// 1. METAL CONTEXT (PIPELINES RESOLVED ONCE)
+// 2. METAL CONTEXT
 // ============================================================
 
 public final class MetalContext {
 
     public let device: MTLDevice
     public let libraries: [MTLLibrary]
-
-    private let pipelines: [String: MTLComputePipelineState]
-
-    @inline(__always)
-    public func pipeline(_ name: String) -> MTLComputePipelineState {
-        pipelines[name]!
-    }
+    public let pipelines: [String: MTLComputePipelineState]
 
     public init(kernelsDirectory: URL) {
-        self.device = MTLCreateSystemDefaultDevice()!
 
-        let fm = FileManager.default
-        let urls = (try? fm.contentsOfDirectory(
+        device = MTLCreateSystemDefaultDevice()!
+
+        let urls = (try? FileManager.default.contentsOfDirectory(
             at: kernelsDirectory,
             includingPropertiesForKeys: nil
         ))?.filter { $0.pathExtension == "metallib" } ?? []
 
-        precondition(!urls.isEmpty, "No .metallib files found")
+        precondition(!urls.isEmpty)
 
         var libs: [MTLLibrary] = []
-        for url in urls {
-            libs.append(try! device.makeLibrary(URL: url))
+        for u in urls {
+            libs.append(try! device.makeLibrary(URL: u))
         }
-        self.libraries = libs
+        libraries = libs
 
-        var pipeTable: [String: MTLComputePipelineState] = [:]
+        var pipes: [String: MTLComputePipelineState] = [:]
+
         for lib in libs {
-            for name in lib.functionNames where pipeTable[name] == nil {
+            for name in lib.functionNames where pipes[name] == nil {
                 let fn = lib.makeFunction(name: name)!
-                pipeTable[name] = try! device.makeComputePipelineState(function: fn)
+                pipes[name] = try! device.makeComputePipelineState(function: fn)
             }
         }
 
-        precondition(!pipeTable.isEmpty, "No compute kernels discovered")
-        self.pipelines = pipeTable
+        precondition(!pipes.isEmpty)
+        pipelines = pipes
     }
 }
 
 // ============================================================
-// 2. GPU BUFFER (FIXED CAPACITY, SHARED MEMORY)
+// 3. GPU BUFFER
 // ============================================================
 
 public final class GPUBuffer<T> {
@@ -77,9 +73,11 @@ public final class GPUBuffer<T> {
     public var count: Int
 
     public init(device: MTLDevice, capacity: Int) {
+
         self.capacity = capacity
         self.count = capacity
-        self.buffer = device.makeBuffer(
+
+        buffer = device.makeBuffer(
             length: capacity * MemoryLayout<T>.stride,
             options: .storageModeShared
         )!
@@ -92,7 +90,7 @@ public final class GPUBuffer<T> {
 }
 
 // ============================================================
-// 3. KERNEL ARG ENUM (NO ALLOCATIONS)
+// 4. KERNEL ARG
 // ============================================================
 
 public enum KernelArg {
@@ -101,12 +99,14 @@ public enum KernelArg {
 }
 
 // ============================================================
-// 4. COMPUTE STREAM (PURE PSO DISPATCH)
+// 5. COMPUTE STREAM
 // ============================================================
 
 public final class ComputeStream {
 
+    private let ctx: MetalContext
     private let queue: MTLCommandQueue
+
     private let inflight: Int
 
     private var cmdRing: [MTLCommandBuffer]
@@ -115,15 +115,20 @@ public final class ComputeStream {
 
     private var index: Int = 0
 
+    // fast kernel cache
+    private var kernelCache: [String: MTLComputePipelineState] = [:]
+
     // --------------------------------------------------------
 
     public init(context: MetalContext, inflightBuffers: Int = 3) {
-        self.queue = context.device.makeCommandQueue()!
-        self.inflight = inflightBuffers
 
-        self.cmdRing = []
-        self.encRing = []
-        self.committed = Array(repeating: false, count: inflight)
+        ctx = context
+        queue = context.device.makeCommandQueue()!
+        inflight = inflightBuffers
+
+        cmdRing = []
+        encRing = []
+        committed = Array(repeating: false, count: inflight)
 
         for _ in 0..<inflight {
             let cmd = queue.makeCommandBuffer()!
@@ -134,23 +139,35 @@ public final class ComputeStream {
     }
 
     // --------------------------------------------------------
-    // 🔥 HOT PATH — DIRECT PIPELINE STATE
+    // HOT PATH
     // --------------------------------------------------------
 
     @inline(__always)
     public func dispatch(
-        pipeline: MTLComputePipelineState,
+        kernel: String,
         args: [KernelArg],
         grid: MTLSize,
         threads: MTLSize
     ) {
+
         let enc = encRing[index]
-        enc.setComputePipelineState(pipeline)
+
+        // cached lookup
+        let pipe = kernelCache[kernel] ?? {
+            let p = ctx.pipelines[kernel]!
+            kernelCache[kernel] = p
+            return p
+        }()
+
+        enc.setComputePipelineState(pipe)
 
         for (i, arg) in args.enumerated() {
+
             switch arg {
+
             case .buffer(let b):
                 enc.setBuffer(b, offset: 0, index: i)
+
             case .bytes(let ptr, let size):
                 enc.setBytes(ptr, length: size, index: i)
             }
@@ -160,11 +177,10 @@ public final class ComputeStream {
     }
 
     // --------------------------------------------------------
-    // SUBMIT + ROTATE RING
-    // --------------------------------------------------------
 
     @inline(__always)
     public func advance() {
+
         let cmd = cmdRing[index]
         let enc = encRing[index]
 
@@ -187,10 +203,9 @@ public final class ComputeStream {
     }
 
     // --------------------------------------------------------
-    // FULL BARRIER (BOUNDARY ONLY)
-    // --------------------------------------------------------
 
     public func synchronize() {
+
         for i in 0..<inflight where committed[i] {
             cmdRing[i].waitUntilCompleted()
             committed[i] = false

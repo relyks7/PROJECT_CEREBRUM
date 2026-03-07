@@ -17,7 +17,7 @@ public func optra(
     var alpha=alpha_
     var beta=beta_
     stream.dispatch(
-        kernel: "1ptra",
+        kernel: "optra",
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
@@ -289,6 +289,40 @@ public func copy(
         args: [
             .buffer(A.buffer),
             .buffer(B.buffer),
+            bytes(&n),
+            bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func scale(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B: GPUBuffer <Float>,
+    _ alpha_: Float,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    precondition(B.count == Int(n_*b_), "B has wrong size")
+    var n=n_
+    var b=b_
+    var alpha=alpha_
+    stream.dispatch(
+        kernel: "scale",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            bytes(&alpha),
             bytes(&n),
             bytes(&b)
         ],
@@ -1677,7 +1711,7 @@ public func get_eta(
     var eta_max=eta_max_
     var alpha=alpha_
     var DA_c=DA_c_
-    abs_mean_simd(stream: stream, elig, scratch0, scratch1, eligmean, n_, k_)
+    abs_mean_simd(stream: stream, elig, scratch0, scratch1, eligmean, k_, n_)
     stream.dispatch(
         kernel: "get_eta",
         args: [
@@ -1853,20 +1887,133 @@ public func bg_oja(
         )
     )
 }
-public func get_alpha(
+public func write_point(
     stream: ComputeStream,
-    E_t: GPUBuffer<Float>,
-    scratch0: GPUBuffer<Float>,
-    scratch1: GPUBuffer<Float>,
-    E_tm: GPUBuffer<Float>,
-    c_: Float,
-    n_: UInt32
-) -> Float{
-    precondition(E_t.count==Int(n_), "E_t has wrong size")
-    abs_mean_simd(stream: stream, E_t, scratch0, scratch1, E_tm, n_, 1)
-    stream.advance()
-    stream.synchronize()
-    var nv=E_tm.ptr()[0]
-    nv=nv/(nv+c_)
-    return nv
+    _ A: GPUBuffer<Float>,
+    _ x_: Float,
+    _ y_: Float
+) {
+    precondition(A.count==2, "A has wrong size")
+    var x=x_
+    var y=y_
+    stream.dispatch(
+        kernel: "write_point",
+        args: [
+            .buffer(A.buffer),
+            bytes(&x),
+            bytes(&y)
+        ],
+        grid: MTLSize(
+            width: 1,
+            height: 1,
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 1,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func fill(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ B_: Float,
+    _ n_: UInt32,
+    _ b_: UInt32
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    var B=B_
+    var n=n_
+    var b=b_
+    stream.dispatch(
+        kernel: "fill",
+        args: [
+            .buffer(A.buffer),
+            bytes(&B),
+            bytes(&n),
+            bytes(&b)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func fill_random(
+    stream: ComputeStream,
+    _ A: GPUBuffer <Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ x_: Float,
+    _ y_: Float
+){
+    precondition(A.count == Int(n_*b_), "A has wrong size")
+    var n=n_
+    var b=b_
+    var x=x_
+    var y=y_
+    stream.dispatch(
+        kernel: "fill_random",
+        args: [
+            .buffer(A.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&x),
+            bytes(&y)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
+}
+public func outer_prod_learn(
+    stream: ComputeStream,
+    _ A: GPUBuffer<Float>,
+    _ B: GPUBuffer<Float>,
+    _ C: GPUBuffer<Float>,
+    _ n_: UInt32,
+    _ b_: UInt32,
+    _ alpha_: Float
+){
+    precondition(A.count == Int(n_), "A has wrong size")
+    precondition(B.count == Int(b_), "B has wrong size")
+    precondition(C.count == Int(n_*b_), "C has wrong size")
+    var n=n_
+    var b=b_
+    var alpha=alpha_
+    stream.dispatch(
+        kernel: "outer_prod_learn",
+        args: [
+            .buffer(A.buffer),
+            .buffer(B.buffer),
+            .buffer(C.buffer),
+            bytes(&n),
+            bytes(&b),
+            bytes(&alpha)
+        ],
+        grid: MTLSize(
+            width: (Int(n) + 255) / 256,
+            height: Int(b),
+            depth: 1
+        ),
+        threads: MTLSize(
+            width: 256,
+            height: 1,
+            depth: 1
+        )
+    )
 }

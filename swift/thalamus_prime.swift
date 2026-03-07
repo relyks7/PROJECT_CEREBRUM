@@ -104,17 +104,17 @@ public final class ThalamusPrime{
         w_ACh_0: Float,
         w_ACh_1: Float,
         w_NE: Float){
-        self.z_t0=GPUBuffer(device: device, capacity: Int(m))
-        self.z_t1=GPUBuffer(device: device, capacity: Int(m))
-        self.E_t=GPUBuffer(device: device, capacity: Int(n*k))
-        self.z_scratch0=GPUBuffer(device: device, capacity: Int(m))
-        self.z_scratch1=GPUBuffer(device: device, capacity: Int(m))
-        self.z_scratch2=GPUBuffer(device: device, capacity: Int(m))
-        self.mean_scratch_0=GPUBuffer(device: device, capacity: Int(n))
-        self.mean_scratch_1=GPUBuffer(device: device, capacity: Int(n))
-        self.NE_0=GPUBuffer(device: device, capacity: Int(1))
-        self.ACh_0=GPUBuffer(device: device, capacity: Int(1))
-        self.DA_0=GPUBuffer(device: device, capacity: Int(1))
+        self.z_t0=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.z_t1=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.E_t=GPUBuffer<Float>(device: device, capacity: Int(n*k))
+        self.z_scratch0=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.z_scratch1=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.z_scratch2=GPUBuffer<Float>(device: device, capacity: Int(m))
+        self.mean_scratch_0=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.mean_scratch_1=GPUBuffer<Float>(device: device, capacity: Int(n))
+        self.NE_0=GPUBuffer<Float>(device: device, capacity: Int(1))
+        self.ACh_0=GPUBuffer<Float>(device: device, capacity: Int(1))
+        self.DA_0=GPUBuffer<Float>(device: device, capacity: Int(1))
         self.device=device
         self.stream=stream
         self.W_tc=W_tc
@@ -177,6 +177,7 @@ public func thalamus_setup(
     m: UInt32,
     n: UInt32,
     k: UInt32,
+    Ds: UInt32,
     lambda_t: Float,
     w_ACh_0: Float,
     w_ACh_1: Float,
@@ -184,11 +185,11 @@ public func thalamus_setup(
 ) -> ThalamusPrime{
     let W_cx = GPUBuffer<Float>(
         device: device,
-        capacity: Int(m) * Int(n * k)
+        capacity: Int(m) * Int(n) * Int(k)
     )
     let W_tc = GPUBuffer<Float>(
         device: device,
-        capacity: Int(n * k) * Int(m)
+        capacity: Int(n) * Int(k) * Int(m)
     )
     let W_s = GPUBuffer<Float>(
         device: device,
@@ -197,15 +198,9 @@ public func thalamus_setup(
     let scale_cx = 1.0 / sqrt(Float(n * k))
     let scale_tc = 1.0 / sqrt(Float(m))
     let scale_s  = 1.0 / sqrt(Float(Ds))
-    for i in 0..<W_cx.count {
-        W_cx.ptr()[i] = Float.random(in: -1.0...1.0) * scale_cx
-    }
-    for i in 0..<W_tc.count {
-        W_tc.ptr()[i] = Float.random(in: -1.0...1.0) * scale_tc
-    }
-    for i in 0..<W_s.count {
-        W_s.ptr()[i] = Float.random(in: -1.0...1.0) * scale_s
-    }
+    fill_random(stream: stream, W_cx, m*n*k, 1, -scale_cx, scale_cx)
+    fill_random(stream: stream, W_tc, n*k*m, 1, -scale_tc, scale_tc)
+    fill_random(stream: stream, W_s, m*Ds, 1, -scale_s, scale_s)
     let thalamus=ThalamusPrime(
         device: device,
         stream: stream,
