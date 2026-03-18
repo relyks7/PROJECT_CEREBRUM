@@ -557,31 +557,6 @@ public final class CortexPrime{
         NE_c=0
         stream.advance()
     }
-    func learn_pred(
-        prediction_error: GPUBuffer<Float>
-    ){
-        sqmean_simd(
-            stream: stream, 
-            H_t0,
-            scratch0,
-            scratch1,
-            H_t0_norm,
-            n*k,
-            1
-        )
-        stream.advance()
-        stream.synchronize()
-        outer_prod_learn(
-            stream: stream,
-            prediction_error,
-            H_t0,
-            W_pred,
-            Ds,
-            n*k,
-            eta_pred * max(0.15, 0.5 + DA_c) / max(1.0, H_t0_norm.ptr()[0]*Float(n*k))
-        )
-        stream.advance()
-    }
 }
 public func cortex_setup(
     n: UInt32,

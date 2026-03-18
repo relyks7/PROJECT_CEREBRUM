@@ -192,10 +192,11 @@ public final class Cerebrum{
             n: CortexL3.n,
             k: CortexL3.k,
             hr: 256,
-            epsilon:0.002,
+            epsilon:0.02,
             alpha: 0.15,
             theta: 0.2,
-            lambda: 0.01,
+            lambda: 0.018,
+            gamma: 0.1,
             tau_b: 0.03,
             omega: 2.0 * Float.pi / 120.0
         )
@@ -216,9 +217,6 @@ public final class Cerebrum{
         sub(stream: stream, CortexL1.U_t1, U_t, pred_error_l1, CortexL1.Ds, 1)
         sub(stream: stream, CortexL2.U_t1, L1_bottlenecked, pred_error_l2, CortexL2.Ds, 1)
         sub(stream: stream, CortexL3.U_t1, L2_bottlenecked, pred_error_l3, CortexL3.Ds, 1)
-        CortexL1.learn_pred(prediction_error:pred_error_l1)
-        CortexL2.learn_pred(prediction_error:pred_error_l2)
-        CortexL3.learn_pred(prediction_error:pred_error_l3)
         CortexL1.update_chemicals(prediction_error:pred_error_l1)
         CortexL2.update_chemicals(prediction_error:pred_error_l2)
         CortexL3.update_chemicals(prediction_error:pred_error_l3)
@@ -322,7 +320,7 @@ for i in 0..<ticks {
     if i%5==0{
     Sextus.bg_learn()}
 
-    if i % 101 == 0 { //temporary disable, temporal poisoning?
+    if i % 101 == 0 {
         Sextus.recall_step(steps: 8)
     }
     if i%20==0{

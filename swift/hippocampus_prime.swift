@@ -10,6 +10,8 @@ public func hippocampus_step(
     _ HC_t: GPUBuffer<Float>,
     _ HC_p: GPUBuffer<Float>,
     _ HC_prev: GPUBuffer<Float>,
+    _ W_r: GPUBuffer<Float>,
+    _ HC_r: GPUBuffer<Float>,
     _ H_t: GPUBuffer<Float>,
     _ H_p: GPUBuffer<Float>,
     _ P: GPUBuffer<Float>,
@@ -22,6 +24,7 @@ public func hippocampus_step(
     _ alpha: Float,
     _ theta: Float,
     _ lambda: Float,
+    _ gamma: Float,
     _ phase: Float,
     _ tau_b: Float,
     _ DA_c: Float,
@@ -32,10 +35,12 @@ public func hippocampus_step(
     let DA0  = clamp01(DA_c)
     let NE0  = clamp01(NE_c)
     copy(stream: stream, HC_t, HC_prev, n_*hr_, 1)
+    gemm(stream: stream, HC_prev, W_r, HC_r, n_, hr_, hr_, 1)
     gemm(stream: stream, H_t, P, H_p, n_, k_, hr_, 1)
     add_scaled(stream: stream, H_p, B, H_p, n_*hr_, 1, 1, sin(phase))
     relu_s(stream: stream, H_p, H_p, n_*hr_, 1, theta*(1.0-0.3*NE0)*(1+sin(phase)*tau_b))
     add_scaled(stream: stream, HC_t, H_p, HC_t, n_*hr_, 1, 1.0-lambda, alpha*ACh0*(0.25+0.75*DA0)*(0.5+0.5*NE0))
+    add_scaled(stream: stream, HC_t, HC_r, HC_t, n_*hr_, 1, 1.0, gamma * (1.0 - ACh0) * (0.5 + 0.5 * DA0) * (0.8 + 0.2 * NE0) * (1.0 - sin(phase)))
     gemm(stream: stream, HC_prev, Q, HC_p, n_, hr_, k_, 1)
     add_scaled(stream: stream, H_t, HC_p, H_t, n_*k_, 1, 1, epsilon*(1.0-ACh0)*(0.5+0.5*DA0))
 }
@@ -45,6 +50,8 @@ public final class HippocampusPrime{
     let stream: ComputeStream
     //main
     var HC_t: GPUBuffer<Float>
+    var W_r: GPUBuffer<Float>
+    var HC_r: GPUBuffer<Float>
     var P: GPUBuffer<Float>
     var Q: GPUBuffer<Float>
     var B: GPUBuffer<Float>
@@ -61,6 +68,7 @@ public final class HippocampusPrime{
     var alpha: Float
     var theta: Float
     var lambda: Float
+    var gamma: Float
     var tau_b: Float
     let omega: Float //=2*3.141592653589793/80
     init(
@@ -72,19 +80,24 @@ public final class HippocampusPrime{
         P: GPUBuffer<Float>,
         Q: GPUBuffer<Float>,
         B: GPUBuffer<Float>,
+        W_r: GPUBuffer<Float>,
         epsilon: Float,
         alpha: Float,
         theta: Float,
         lambda: Float,
+        gamma: Float,
         tau_b: Float,
         omega: Float
     ){
         self.device=device
         self.stream = stream
         self.HC_t=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
+        self.HC_r=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
+        self.W_r=W_r
         self.P=P
         self.Q=Q
         self.B=B
+        self.gamma=gamma
         self.HC_p=GPUBuffer<Float>(device: device, capacity: Int(n*k))
         self.HC_prev=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
         self.H_p=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
@@ -111,6 +124,8 @@ public final class HippocampusPrime{
             HC_t, 
             HC_p,
             HC_prev,
+            W_r,
+            HC_r,
             H_t,
             H_p,
             P,
@@ -123,6 +138,7 @@ public final class HippocampusPrime{
             alpha,
             theta,
             lambda,
+            gamma,
             phase,
             tau_b,
             DA_c,
@@ -143,12 +159,16 @@ public func hippocampus_setup(
     alpha: Float,
     theta: Float,
     lambda: Float,
+    gamma: Float,
     tau_b: Float,
     omega: Float
 ) -> HippocampusPrime{
     let P=GPUBuffer<Float>(device: device, capacity: Int(k*hr))
     let Q=GPUBuffer<Float>(device: device, capacity: Int(hr*k))
     let B=GPUBuffer<Float>(device: device, capacity: Int(n*hr))
+    let W_r=GPUBuffer<Float>(device: device, capacity: Int(hr*hr))
+    let density: Float=0.1
+    let wrScale: Float = 1.0 / sqrt(Float(hr * density))
     let pScale: Float = 1.0 / sqrt(Float(k))
     let noiseScale: Float = 0.02 * pScale
     fill_random(stream: stream, P, k*hr, 1, -pScale, pScale)
@@ -157,6 +177,15 @@ public func hippocampus_setup(
         for j in 0..<k {
             let noise = Float.random(in: -noiseScale...noiseScale)
             Q.ptr()[Int(i*k+j)] = P.ptr()[Int(j*hr+i)] + noise
+        }
+    }
+    for i in 0..<hr {
+        for j in 0..<hr {
+            if Float.random(in: 0...1) < density{
+                W_r.ptr()[Int(i*hr+j)] = Float.random(in: 0...wrScale)
+            } else{
+                W_r.ptr()[Int(i*hr+j)]=0
+            }
         }
     }
     stream.advance()
@@ -170,10 +199,12 @@ public func hippocampus_setup(
         P: P,
         Q: Q,
         B: B,
+        W_r: W_r,
         epsilon: epsilon,
         alpha: alpha,
         theta: theta,
         lambda: lambda,
+        gamma: gamma,
         tau_b: tau_b,
         omega: omega
     )
